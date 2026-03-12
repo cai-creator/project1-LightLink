@@ -23,7 +23,7 @@ namespace ImgPrase {
 		bool BWRatePreprocessing(Mat& image, vector<int>& vValueCount);//黑白条纹预处理
 		bool IsQrBWRateXLegal(Mat& image);//检查X方向的黑白比例
 		bool IsQrBWRate(Mat& image); //检查二维码的黑白比例
-		bool IsQrSizeLegal(const ParseInfo& info, const Mat& image);//判断二维码尺寸是否合法
+		bool IsQrSizeLegal(const Size2f& qrSize, const Size2f& imgSize);//判断二维码尺寸是否合法
 		Mat CropRect(const Mat& srcImg, const RotatedRect& rotatedRect);//裁剪旋转矩形区域
 		bool IsQrPoint(const vector<Point>& contour, const Mat& img);//判断是否为二维码定位点
 		bool isRightAngleExist(const Point& point0, const Point& point1, const Point& point2);//判断三个点是否存在直角
@@ -31,9 +31,9 @@ namespace ImgPrase {
 		bool IsClockwise(const Point& basePoint, const Point& point1, const Point& point2);//判断顺逆时针
 		Point CalFourthPoint(const Point& point0, const Point& point1, const Point& point2);//计算第四个点
 		pair<float, float> CalExtendVec(const Point2f& point0, const Point2f& point1, const Point2f& point2, float bias);//计算扩展向量
-
+	}
 	// 图像预处理：灰度化 → 降噪 → 二值化
-	Mat preprocessImg(const Mat& srcImg,float blurRate = 0.0005);
+	Mat preprocessImg(const Mat& srcImg,float blurRate = 0.001);
 
 	// 轮廓检测和定位点筛选
 	bool findPositionPoints(const Mat& binaryImg, vector<vector<Point>>& qrPoint);

@@ -1,44 +1,44 @@
-﻿#include <opencv2/opencv.hpp>
+#include <opencv2/opencv.hpp>
 #include <iostream>
 #include <pic.h>
-//暂时用于测试
+#include <Windows.h>
 
 int main()
 {
-    // 1. 读取图片
-    std::string image_path = R"(F:\Gemini_Generated_Image_x6jjkcx6jjkcx6jj.png)";
-    cv::Mat image = cv::imread(image_path, cv::IMREAD_COLOR);
+	// 设置控制台输出编码为UTF-8
+	SetConsoleOutputCP(CP_UTF8);
 
-    // 检查图片是否读取成功
-    if (image.empty())
-    {
-        std::cout << "无法读取图片，请检查路径: " << image_path << std::endl;
-        return -1;
-    }
+	std::string image_path = R"(E:\01850.jpg)";
+	cv::Mat image = cv::imread(image_path, cv::IMREAD_COLOR);
 
-	//图像预处理：灰度化 → 降噪 → 二值化
-    
-    cv::Mat processed_image = ImgPrase::preprocessImg(image);
-    // 2. 显示图片
-    cv::imshow("显示窗口", processed_image);
-    std::cout << "press 's' to save picture,press others to exit..." << std::endl;
+	if (image.empty())
+	{
+		std::cout << "无法读取图片: " << image_path << std::endl;
+		return -1;
+	}
 
-    // 3. 等待按键
-    int key = cv::waitKey(0); // 等待无限长时间
+	cv::Mat processed_image = ImgPrase::preprocessImg(image);
+	cv::imshow("二值化", processed_image);
 
-    // 4. 如果按下 's' 键，保存图片
-    if (key == 's')
-    {
-        cv::imwrite("saved_image.png", image);
-        std::cout << "picture saved in saved_image.png" << std::endl;
-    }
-    else
-    {
-        std::cout << "exit." << std::endl;
-    }
+	cv::Mat qr_result;
+	if (ImgPrase::Main(image, qr_result)) {
+		cv::imshow("结果:", qr_result);
+		std::cout << "成功!" << std::endl;
+		std::cout << "按 's' 保存结果" << std::endl;
 
-    // 5. 销毁所有窗口
-    cv::destroyAllWindows();
+		int key = cv::waitKey(0);
 
-    return 0;
+		if (key == 's') {
+			cv::imwrite("qr_result.png", qr_result);
+			std::cout << "结果已保存到 qr_result.png" << std::endl;
+		}
+	} else {
+		std::cout << "默认！" << std::endl;
+		std::cout << "按任意键退出..." << std::endl;
+		cv::waitKey(0);
+	}
+
+	cv::destroyAllWindows();
+
+	return 0;
 }
