@@ -1,6 +1,6 @@
 #include <pic.h>
 namespace ImgPrase {
-	
+
 	// 常量定义
 constexpr float MinRightAngle = 75.0;
 constexpr float MaxRightAngle = 105.0;
@@ -62,6 +62,7 @@ constexpr float minDistanceRate = 0.9; // 距离比例
 			for (int i = 0; i < nc; i++) {
 				uchar color = data[i];
 				if (color > 0) color = 255;
+				//else color = 0;
 				if (i == 0)
 				{
 					lastColor = color;
