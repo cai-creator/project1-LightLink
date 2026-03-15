@@ -72,13 +72,13 @@
   <PropertyGroup Label="UserMacros" />
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
     <OutDir>$(SolutionDir)bin\</OutDir>
-    <IncludePath>$(SolutionDir)src\opencv\build\include;$(IncludePath)</IncludePath>
-    <LibraryPath>$(SolutionDir)src\opencv\build\x64\vc16\lib;$(LibraryPath)</LibraryPath>
+    <IncludePath>$(SolutionDir)dependencies\opencv\build\include;$(IncludePath)</IncludePath>
+    <LibraryPath>$(SolutionDir)dependencies\opencv\build\vc16\lib;$(LibraryPath)</LibraryPath>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
     <OutDir>$(SolutionDir)bin\</OutDir>
-    <IncludePath>$(SolutionDir)src\opencv\build\include;$(IncludePath)</IncludePath>
-    <LibraryPath>$(SolutionDir)src\opencv\build\x64\vc16\lib;$(LibraryPath)</LibraryPath>
+    <IncludePath>$(SolutionDir)dependencies\opencv\build\include;$(IncludePath)</IncludePath>
+    <LibraryPath>$(SolutionDir)dependencies\opencv\build\vc16\lib;$(LibraryPath)</LibraryPath>
   </PropertyGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
     <ClCompile>
@@ -115,12 +115,16 @@
       <PreprocessorDefinitions>_DEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
       <LanguageStandard>stdcpp20</LanguageStandard>
+      <AdditionalIncludeDirectories>E:\githubproject\project1-LightLink\src</AdditionalIncludeDirectories>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
       <GenerateDebugInformation>true</GenerateDebugInformation>
-      <AdditionalDependencies>opencv_world4120.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>opencv_world4120d.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
+    <CustomBuildStep>
+      <Inputs>	opencv_world4120d.lib</Inputs>
+    </CustomBuildStep>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
     <ClCompile>
@@ -139,9 +143,19 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
-    <ClCompile Include="Project-1-LightLink.cpp" />
+    <ClCompile Include="codeTool.cpp" />
+    <ClCompile Include="myTool.cpp" />
+    <ClCompile Include="ffmpegTool.cpp" />
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="codeTool.h" />
+    <ClInclude Include="ffmpegTool.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
   </ImportGroup>
+  <PropertyGroup Label="DebugSettings">
+    <LocalDebuggerWorkingDirectory>$(SolutionDir)</LocalDebuggerWorkingDirectory>
+    <DebuggerFlavor>WindowsLocalDebugger</DebuggerFlavor>
+  </PropertyGroup>
 </Project>
