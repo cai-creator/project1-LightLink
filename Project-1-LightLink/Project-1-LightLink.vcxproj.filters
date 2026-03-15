@@ -24,12 +24,24 @@
     <ClCompile Include="ffmpegTool.cpp">
       <Filter>头文件</Filter>
     </ClCompile>
+    <ClCompile Include="pic.cpp">
+      <Filter>头文件</Filter>
+    </ClCompile>
+    <ClCompile Include="decodeTool.cpp">
+      <Filter>头文件</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="codeTool.h">
       <Filter>头文件</Filter>
     </ClInclude>
     <ClInclude Include="ffmpegTool.h">
+      <Filter>头文件</Filter>
+    </ClInclude>
+    <ClInclude Include="pic.h">
+      <Filter>头文件</Filter>
+    </ClInclude>
+    <ClInclude Include="decodeTool.h">
       <Filter>头文件</Filter>
     </ClInclude>
   </ItemGroup>

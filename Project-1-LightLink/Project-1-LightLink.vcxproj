@@ -144,12 +144,16 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="codeTool.cpp" />
+    <ClCompile Include="decodeTool.cpp" />
     <ClCompile Include="myTool.cpp" />
     <ClCompile Include="ffmpegTool.cpp" />
+    <ClCompile Include="pic.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="codeTool.h" />
+    <ClInclude Include="decodeTool.h" />
     <ClInclude Include="ffmpegTool.h" />
+    <ClInclude Include="pic.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
