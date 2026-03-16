@@ -1,10 +1,12 @@
 #pragma once
 #include<cstdio>
+#include<filesystem>
 #include<opencv2/opencv.hpp>
 
 namespace ImgPraseV2 {
 	using namespace cv;
 	using namespace std;
+	namespace fs = std::filesystem;
 
 	namespace helpFunction {
 		struct ParseInfo;
@@ -34,5 +36,13 @@ namespace ImgPraseV2 {
 	bool findPositionPoints(const Mat& binaryImg, vector<vector<Point>>& qrPoint);
 	vector<Point2f> adjustPositionPoints(const vector<Point2f>& positionPoints);
 	Mat cropParallelRect(const Mat& srcImg, const vector<Point2f>& srcPoints);
-	bool Main(const Mat& srcImg, Mat& dstImg);
+	bool Main(const Mat& srcImg, Mat& dstImg, bool debugMode = true);
+
+	namespace helpFunction {
+		void resizeKeepAspect(const Mat& src, Mat& dst, const Size& targetSize);
+	}
+
+	Mat step1_preliminaryCrop(const Mat& srcImg, const vector<vector<Point>>& qrPoints);
+	Mat step2_perspectiveCorrect(const Mat& srcImg, const vector<vector<Point>>& qrPoints);
+	Mat step3_finalCrop(const Mat& srcImg);
 }
