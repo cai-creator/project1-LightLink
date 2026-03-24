@@ -42,21 +42,32 @@ void decodeEXE() {
 
 int main(int argc, char *argv[])
 {
-	if (argc != 3) {
-		std::cout << "Format error" << std::endl;
+//	if (argc != 3) {
+//		std::cout << "Format error" << std::endl;
+//	}
+//
+//	std::string source_path(argv[1]);
+//	std::string target_path(argv[2]);
+//	
+//#ifdef _ENCODE
+//	encodeEXE(source_path,target_path);
+//
+//#elif defined(_DECODE)
+//	decodeEXE();
+//#else
+//	std::cerr << "Error: Please define either _ENCODE or _DECODE before compiling." << std::endl;
+//   
+//#endif
+
+	uint16_t x = GetCheckCode(3, "ABC", 1, frameStyle::First);
+	uint16_t a[16];
+	for (int i = 0;i < 16;i++) {
+		a[i] = x & 1;
+		x >>= 1;
 	}
 
-	std::string source_path(argv[1]);
-	std::string target_path(argv[2]);
-	
-#ifdef _ENCODE
-	encodeEXE(source_path,target_path);
-
-#elif defined(_DECODE)
-	decodeEXE();
-#else
-	std::cerr << "Error: Please define either _ENCODE or _DECODE before compiling." << std::endl;
-   
-#endif
+	for (int i = 15;i >=0 ;i--) {
+		std::cout << a[i];
+	}
 	return 0;
 }

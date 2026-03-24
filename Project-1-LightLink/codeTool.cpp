@@ -252,23 +252,49 @@ namespace code
 #endif
     }
 
-    // --- 获取校验码 ---
-    int GetCheckCode(int data_len, const char*Info, int frame_id, frameStyle style ) {
-        uint16_t res = 0;
-        int len = data_len/2*2;
-
-        for (int i = 0;i < len;i += 2) {
-            res ^= (int)Info[i] << 8 | (int)Info[i + 1];
+    uint16_t crc16_maxim(uint8_t *data, uint16_t length){
+    uint8_t i;
+    uint16_t crc = 0;
+    while(length--)
+    {
+        crc ^= *data++;
+        for (i = 0; i < 8; ++i)
+        {
+            if (crc & 1)
+                crc = (crc >> 1) ^ 0xA001;
+            else
+                crc >>= 1;
         }
-        res ^= (uint16_t)frame_id;
-        res ^= (uint16_t)style;
-        res ^=data_len;
+    }
+    return ~crc;
+    }
 
-        return res;
+    // --- 获取校验码 ---
+    uint16_t GetCheckCode(int data_len, const char*Info, int frame_id, frameStyle style ) {
+        uint16_t crc ;
+        // ----- 用来寄存crc输入的 -----
+        uint8_t data[2048];
+        if(2048<data_len + 10) return 0;
+
+        memcpy(data, Info, data_len);
+
+        int idx = data_len;
+
+        for(int i = 0;i<(int)(sizeof(int));i++){
+            data[idx++] = (uint8_t) ((frame_id >> i * 8)&0xFF);
+        }
+
+        for(int i = 0;i<(int)(sizeof(int));i++){
+            data[idx++] = (uint8_t) ((data_len >> i * 8)&0xFF);
+        }
+
+        data[idx++] = (uint8_t) ((uint8_t)style&0xFF);
+        crc = crc16_maxim(data, idx);
+        return crc;
     }
     
     // --- 写入校验码 ---
-    void InputCheckCode(Mat& frame, int checkcode) {
+    void InputCheckCode(Mat& frame, uint16_t checkcode) {
         constexpr int fixed_col = 89; // 编号帧固定在第88列
         for (int i = 0;i < 16;i++) {
             frame.at<Vec3b>(i + 2, fixed_col) = pixcolor[checkcode & 1];
@@ -299,7 +325,7 @@ namespace code
         // --- 写入信息区 ---
         InputFrameFlag(frame, style, data_len);
         InputFrameNumber(frame, frame_id);
-        int chekcode = GetCheckCode(data_len, data, frame_id, style);
+        uint16_t chekcode = GetCheckCode(data_len, data, frame_id, style);
         InputCheckCode(frame, chekcode);
 
         for (int i = 0;i < 10;i++) {
