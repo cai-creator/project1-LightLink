@@ -1,3 +1,5 @@
+// 解码工具头文件
+// 提供单张二维码图片解码功能，将二维码图像转换为原始数据
 #pragma once
 #include <opencv2/opencv.hpp>
 #include <string>
