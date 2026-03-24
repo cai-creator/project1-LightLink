@@ -544,12 +544,58 @@ namespace ImgPrase {
 
 					// 提取中心点
 					vector<Point2f> points;
-					for (const auto& contour : qrPointsTemp) {
-						points.push_back(helpFunction::CalRectCenter(contour));
+					for (int k = 0; k < qrPoints.size(); k++) {
+						points.push_back(helpFunction::CalOuterCorner(qrPoints[k], centers));
 					}
 
-					// 计算第四个点并调整
-					vector<Point2f> adjusted = adjustPositionPoints(points);
+					// 调整位置点顺序
+					vector<Point2f> adjusted1 = adjustPositionPoints(points, qrPoints, false);
+
+					// 保存调整后的点调试图像
+					if (!debugPath.empty()) {
+						Mat debugPoints2 = srcImg.clone();
+						for (int k = 0; k < points.size(); k++) {
+							circle(debugPoints2, points[k], 8, Scalar(0, 255, 0), 2);
+							putText(debugPoints2, to_string(k), points[k], FONT_HERSHEY_SIMPLEX, 0.5, Scalar(255, 255, 0), 2);
+						}
+						for (int k = 0; k < adjusted1.size(); k++) {
+							circle(debugPoints2, adjusted1[k], 5, Scalar(0, 0, 255), -1);
+							putText(debugPoints2, to_string(k) + "a", adjusted1[k], FONT_HERSHEY_SIMPLEX, 0.4, Scalar(255, 0, 255), 2);
+						}
+						imwrite(debugPath + "_1a_points.png", debugPoints2);
+					}
+
+					// 透视变换裁剪
+					Mat cropped1 = cropParallelRect(srcImg, adjusted1);
+
+					if (!cropped1.empty()) {
+						// 保存裁剪调试图像
+						if (!debugPath.empty()) {
+							Mat debugCrop = cropped1.clone();
+							for (int k = 0; k < 4; k++) {
+								circle(debugCrop, adjusted1[k], 5, Scalar(0, 0, 255), -1);
+								putText(debugCrop, to_string(k), adjusted1[k], FONT_HERSHEY_SIMPLEX, 0.5, Scalar(255, 0, 0), 2);
+							}
+							imwrite(debugPath + "_2_cropped1.png", debugCrop);
+						}
+
+						Mat finalCrop = cropped1;
+
+						Mat grayCrop;
+				// 灰度化
+				if (finalCrop.channels() == 3) {
+					cvtColor(finalCrop, grayCrop, COLOR_BGR2GRAY);
+				}
+				else {
+					grayCrop = finalCrop.clone();
+				}
+
+				// 增强高斯模糊以去除摩尔纹
+				GaussianBlur(grayCrop, grayCrop, Size(5, 5), 0);
+
+				// 使用固定阈值二值化，降低白色阈值到100
+				Mat binaryCrop;
+				threshold(grayCrop, binaryCrop, 100, 255, THRESH_BINARY);
 
 					// 透视变换
 					dstImg = cropParallelRect(srcImg, adjusted);
