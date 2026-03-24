@@ -430,9 +430,9 @@ namespace ImgPraseV2 {
 		 * @details 使用叉积判断方向
 		 */
 		bool IsClockwise(const Point& basePoint, const Point& point1, const Point& point2) {
-    		float ax = point1.x - basePoint.x, ay = point1.y - basePoint.y;
-    		float bx = point2.x - basePoint.x, by = point2.y - basePoint.y;
-    		return (ax * by - ay * bx) > 0;
+			float ax = point1.x - basePoint.x, ay = point1.y - basePoint.y;
+			float bx = point2.x - basePoint.x, by = point2.y - basePoint.y;
+			return (ax * by - ay * bx) > 0;
 		}
 
 		/**
@@ -466,11 +466,11 @@ namespace ImgPraseV2 {
 			vector<pair<float, int>> angleIdx;
 			for (int i = 0; i < points.size(); i++) {
 				float angle = CalAngle(center, points[i]);
-				angleIdx.push_back({angle, i});
+				angleIdx.push_back({ angle, i });
 			}
 			sort(angleIdx.begin(), angleIdx.end(), [](const auto& a, const auto& b) {
 				return a.first < b.first;
-			});
+				});
 
 			indices.resize(points.size());
 			for (int i = 0; i < angleIdx.size(); i++) {
@@ -725,7 +725,7 @@ namespace ImgPraseV2 {
 			// 按面积降序排序
 			sort(temp.begin(), temp.end(), [](const vector<Point>& a, const vector<Point>& b) {
 				return a.size() > b.size();
-			});
+				});
 
 			// 前三个点检查
 			Point p0 = helpFunction::CalRectCenter(temp[0]);
@@ -928,7 +928,8 @@ namespace ImgPraseV2 {
 		for (const auto& p : workPoints) {
 			if (p.y < midY) {
 				topCands.push_back(p);
-			} else {
+			}
+			else {
 				bottomCands.push_back(p);
 			}
 		}
@@ -937,7 +938,7 @@ namespace ImgPraseV2 {
 		if (bottomCands.size() >= 1) {
 			sort(bottomCands.begin(), bottomCands.end(), [](const Point2f& a, const Point2f& b) {
 				return a.x < b.x;
-			});
+				});
 			bottomLeft = bottomCands[0];
 		}
 
@@ -945,14 +946,15 @@ namespace ImgPraseV2 {
 		if (topCands.size() >= 2) {
 			sort(topCands.begin(), topCands.end(), [](const Point2f& a, const Point2f& b) {
 				return a.x < b.x;
-			});
+				});
 			topLeft = topCands[0];
 			topRight = topCands[1];
-		} else if (topCands.size() == 1 && bottomCands.size() >= 2) {
+		}
+		else if (topCands.size() == 1 && bottomCands.size() >= 2) {
 			topLeft = topCands[0];
 			sort(bottomCands.begin(), bottomCands.end(), [](const Point2f& a, const Point2f& b) {
 				return a.x < b.x;
-			});
+				});
 			topRight = bottomCands[0];
 		}
 
@@ -963,7 +965,8 @@ namespace ImgPraseV2 {
 
 		if (hasFourthPoint) {
 			result.push_back(fourthPoint);  // 右下(辅助点)
-		} else {
+		}
+		else {
 			result.push_back(bottomLeft + topRight - topLeft);  // 计算右下角
 		}
 
@@ -1101,7 +1104,8 @@ namespace ImgPraseV2 {
 						// 灰度化
 						if (finalCrop.channels() == 3) {
 							cvtColor(finalCrop, grayCrop, COLOR_BGR2GRAY);
-						} else {
+						}
+						else {
 							grayCrop = finalCrop.clone();
 						}
 
@@ -1109,8 +1113,8 @@ namespace ImgPraseV2 {
 						Mat binaryCrop;
 						threshold(grayCrop, binaryCrop, 127, 255, THRESH_BINARY);
 
-						// 调整大小到108x108
-						resize(binaryCrop, dstImg, Size(108, 108), 0, 0, INTER_NEAREST);
+						// 调整大小到1080x1080
+						resize(binaryCrop, dstImg, Size(1080, 1080), 0, 0, INTER_NEAREST);
 						return true;
 					}
 				}

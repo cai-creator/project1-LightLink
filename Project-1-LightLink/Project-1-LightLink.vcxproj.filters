@@ -30,9 +30,6 @@
     <ClCompile Include="decodeTool.cpp">
       <Filter>头文件</Filter>
     </ClCompile>
-    <ClCompile Include="pic_v2.cpp">
-      <Filter>头文件</Filter>
-    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="codeTool.h">
@@ -45,9 +42,6 @@
       <Filter>头文件</Filter>
     </ClInclude>
     <ClInclude Include="decodeTool.h">
-      <Filter>头文件</Filter>
-    </ClInclude>
-    <ClInclude Include="pic_v2.h">
       <Filter>头文件</Filter>
     </ClInclude>
   </ItemGroup>

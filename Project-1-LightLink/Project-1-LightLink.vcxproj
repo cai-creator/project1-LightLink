@@ -148,14 +148,12 @@
     <ClCompile Include="myTool.cpp" />
     <ClCompile Include="ffmpegTool.cpp" />
     <ClCompile Include="pic.cpp" />
-    <ClCompile Include="pic_v2.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="codeTool.h" />
     <ClInclude Include="decodeTool.h" />
     <ClInclude Include="ffmpegTool.h" />
     <ClInclude Include="pic.h" />
-    <ClInclude Include="pic_v2.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
