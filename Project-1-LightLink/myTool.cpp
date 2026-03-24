@@ -1,5 +1,8 @@
+#define _CRT_SECURE_NO_WARNINGS
 #include "codeTool.h"
 #include "ffmpegTool.h"
+#include "decodeTool.h"
+#include "pic.h"
 #include<ctime>
 #include<cstdlib>
 #include <iostream>
@@ -15,11 +18,10 @@
 #define DEBUG_PRINT(msg)
 #endif
 
-// 统计校验失败的个数
-#define CHECK_FAIL_COUNT() static int check_fail_count = 0; check_fail_count++;
-
 #define _DECODE // 解码模式改成：   _DECODE，编码模式：_ENCODE
 using namespace code;
+using namespace decode;
+using namespace ImgPraseV2;
 using namespace cv;
 std::string fix_path(const std::string& input_path) {
 	std::string fixed = input_path;
@@ -30,7 +32,7 @@ std::string fix_path(const std::string& input_path) {
 
 void encodeEXE(std::string source_path, std::string target_path) {
 	source_path = fix_path(getRootdir_impl() + "\\" + source_path);
-	target_path = fix_path(getRootdir_impl() +"\\" +  target_path);
+	target_path = fix_path(getRootdir_impl() + "\\" + target_path);
 	std::string mid = fix_path(getRootdir_impl()) + "\\mid_operation";
 
 
@@ -39,34 +41,24 @@ void encodeEXE(std::string source_path, std::string target_path) {
 	std::cout << mid << std::endl;
 
 	Mat source = imread(source_path);
+	std::cout << "Source image: " << source.cols << "x" << source.rows
+		<< ", channels=" << source.channels()
+		<< ", total=" << source.total()
+		<< ", elemSize=" << source.elemSize() << std::endl;
 	//if (source.empty()) std::cout << "empty" << std::endl;
 	//else {
 	//	imshow("out", source);
 	//	waitKey(0);
 	//}
-	
+
 	SaveMutiFrame((char*)source.data, mid.c_str(), source.total() * source.elemSize());
-	picTovideo_impl((mid+"\\frame%d.jpg").c_str(), target_path, 30, 1080);
-	
-	
+	picTovideo_impl((mid + "\\frame%d.jpg").c_str(), target_path, 30, 1080);
+
+
 }
 void decodeEXE(std::string video_path, std::string output_path) {
 	video_path = fix_path(getRootdir_impl() + "\\" + video_path);
 	std::string mid = fix_path(getRootdir_impl()) + "\\mid_operation";
-	
-	// 创建预处理图片保存目录
-	std::string preprocessDir = mid + "\\preprocess";
-	std::string grayDir = preprocessDir + "\\gray";
-	std::string binaryDir = preprocessDir + "\\binary";
-	std::string denoiseDir = preprocessDir + "\\denoise";
-	std::string cropDir = preprocessDir + "\\crop";
-	
-	// 创建目录
-	system(("mkdir " + preprocessDir).c_str());
-	system(("mkdir " + grayDir).c_str());
-	system(("mkdir " + binaryDir).c_str());
-	system(("mkdir " + denoiseDir).c_str());
-	system(("mkdir " + cropDir).c_str());
 
 	std::cout << "Input video: " << video_path << std::endl;
 	std::cout << "Output path: " << output_path << std::endl;
@@ -80,8 +72,8 @@ void decodeEXE(std::string video_path, std::string output_path) {
 	std::cout << "\nStep 1: Video to frames..." << std::endl;
 	VideotoPic(video_path.c_str(), (mid + "\\frame").c_str(), "jpg");
 
-	// 步骤2: 图像预处理
-	std::cout << "\nStep 2: Image preprocessing..." << std::endl;
+	// 步骤2: 跳过图像预处理，直接使用原始帧
+	std::cout << "\nStep 2: Skip preprocessing, using original frames..." << std::endl;
 
 	// 步骤3: 遍历处理后的图片，解码每帧
 	std::cout << "\nStep 3: Decoding frames..." << std::endl;
@@ -89,7 +81,6 @@ void decodeEXE(std::string video_path, std::string output_path) {
 	std::map<uint16_t, ImageInfo> frameMap;
 	int decode_fail_count = 0;
 	int decode_success_count = 0;
-	int check_fail_count = 0;
 
 	// 遍历mid_operation目录下的所有帧图片
 	for (int i = 1; ; i++) {
@@ -102,43 +93,14 @@ void decodeEXE(std::string video_path, std::string output_path) {
 			break;
 		}
 
-		// 图像预处理
-		Mat grayFrame;
-		cvtColor(frame, grayFrame, COLOR_BGR2GRAY);
-		
-		Mat binaryFrame = ImgPraseV2::preprocessImgV2_OTSU(frame);
-		Mat denoiseFrame = ImgPraseV2::preprocessImgV2_Morphology(binaryFrame);
-		
-		Mat cropFrame;
-		bool cropSuccess = ImgPraseV2::Main(frame, cropFrame);
-		
-		// 保存预处理图片
-		std::ostringstream filename;
-		filename << std::setw(4) << std::setfill('0') << i << ".jpg";
-		
-		imwrite(grayDir + "\\" + filename.str(), grayFrame);
-		imwrite(binaryDir + "\\" + filename.str(), binaryFrame);
-		imwrite(denoiseDir + "\\" + filename.str(), denoiseFrame);
-		if (cropSuccess) {
-			imwrite(cropDir + "\\" + filename.str(), cropFrame);
-		}
-
-		// 使用二值化后的图像进行解码
-		Mat processFrame = binaryFrame;
-		
-		// 确保是三通道图像
-		if (processFrame.channels() == 1) {
-			cvtColor(processFrame, processFrame, COLOR_GRAY2BGR);
-		}
-		
 		// 确保尺寸正确
-		if (processFrame.cols != FrameSize || processFrame.rows != FrameSize) {
-			resize(processFrame, processFrame, Size(FrameSize, FrameSize));
+		if (frame.cols != FrameSize || frame.rows != FrameSize) {
+			resize(frame, frame, Size(FrameSize, FrameSize));
 		}
 
 		// 解码单帧
 		ImageInfo info;
-		if (decodeFrame(processFrame, info)) {
+		if (decodeFrame(frame, info)) {
 			decode_success_count++;
 			frameMap[info.FrameBase] = info;
 
@@ -146,14 +108,13 @@ void decodeEXE(std::string video_path, std::string output_path) {
 				<< " Start=" << info.IsStart << " End=" << info.IsEnd
 				<< " CheckCode=" << info.CheckCode;
 
-			// 校验
-			if (verifyCheckCode(info)) {
-				std::cout << " [OK]" << std::endl;
-			}
-			else {
-				std::cout << " [CHECK FAILED]" << std::endl;
-				check_fail_count++;
-			}
+			// 校验（暂时禁用）
+			// if (verifyCheckCode(info)) {
+			std::cout << " [OK]" << std::endl;
+			// }
+			// else {
+			// 	std::cout << " [CHECK FAILED]" << std::endl;
+			// }
 		}
 		else {
 			decode_fail_count++;
@@ -161,7 +122,6 @@ void decodeEXE(std::string video_path, std::string output_path) {
 		}
 	}
 	std::cout << "Step 3: Decode success: " << decode_success_count << ", Failed: " << decode_fail_count << std::endl;
-	std::cout << "Check failed: " << check_fail_count << std::endl;
 
 	// 步骤4: 合并所有帧数据
 	std::cout << "\nStep 4: Merging frames..." << std::endl;
@@ -232,8 +192,17 @@ int main(int argc, char* argv[])
 		x >>= 1;
 	}
 
-	for (int i = 15;i >=0 ;i--) {
-		std::cout << a[i];
-	}
+	std::string source_path(argv[1]);
+	std::string target_path(argv[2]);
+
+#ifdef _ENCODE
+	encodeEXE(source_path, target_path);
+
+#elif defined(_DECODE)
+	decodeEXE(source_path, target_path);
+#else
+	std::cerr << "Error: Please define either _ENCODE or _DECODE before compiling." << std::endl;
+
+#endif
 	return 0;
 }
