@@ -40,29 +40,45 @@ namespace decode {
     };
 
     // 判断像素是黑色还是白色（灰度阈值，用于处理JPEG压缩后的质量损失）
-    inline bool isBlack(const cv::Vec3b& pixel) {
-        // 使用灰度值判断：< 128 视为黑色
-        return (pixel[0] + pixel[1] + pixel[2]) / 3 < 128;
+    inline bool isBlack(const cv::Mat& frame, int row, int col) {
+        if (frame.channels() == 3) {
+            // 彩色图像
+            cv::Vec3b pixel = frame.at<cv::Vec3b>(row, col);
+            return (pixel[0] + pixel[1] + pixel[2]) / 3 < 128;
+        } else if (frame.channels() == 1) {
+            // 灰度图像
+            uchar pixel = frame.at<uchar>(row, col);
+            return pixel < 128;
+        }
+        return false;
     }
 
-    inline bool isWhite(const cv::Vec3b& pixel) {
-        // 使用灰度值判断：>= 128 视为白色
-        return (pixel[0] + pixel[1] + pixel[2]) / 3 >= 128;
+    inline bool isWhite(const cv::Mat& frame, int row, int col) {
+        if (frame.channels() == 3) {
+            // 彩色图像
+            cv::Vec3b pixel = frame.at<cv::Vec3b>(row, col);
+            return (pixel[0] + pixel[1] + pixel[2]) / 3 >= 128;
+        } else if (frame.channels() == 1) {
+            // 灰度图像
+            uchar pixel = frame.at<uchar>(row, col);
+            return pixel >= 128;
+        }
+        return true;
     }
 
-    // 10个信息区的位置和尺寸定义（108版本）
+    // 10个信息区的位置和尺寸定义（1080版本）
     // 格式：{起始行, 起始列, 行数, 列数}
     const int INFO_AREA_SIZE[10][4] = {
-        {2, 18, 16, 34},   // 信息区0: 16×34
-        {2, 52, 16, 35},   // 信息区1: 16×35
-        {18, 2, 36, 52},   // 信息区2: 36×52
-        {18, 54, 36, 52},  // 信息区3: 36×52
-        {54, 2, 36, 52},   // 信息区4: 36×52
-        {54, 54, 36, 52},  // 信息区5: 36×52
-        {90, 18, 16, 36},  // 信息区6: 16×36
-        {90, 54, 16, 36},  // 信息区7: 16×36
-        {90, 90, 8, 16},   // 信息区8: 8×16
-        {98, 90, 8, 8}     // 信息区9: 8×8
+        {20, 180, 160, 340},   // 信息区0: 160×340
+        {20, 520, 160, 350},   // 信息区1: 160×350
+        {180, 20, 360, 520},   // 信息区2: 360×520
+        {180, 540, 360, 520},  // 信息区3: 360×520
+        {540, 20, 360, 520},   // 信息区4: 360×520
+        {540, 540, 360, 520},  // 信息区5: 360×520
+        {900, 180, 160, 360},  // 信息区6: 160×360
+        {900, 540, 160, 360},  // 信息区7: 160×360
+        {900, 900, 80, 160},   // 信息区8: 80×160
+        {980, 900, 80, 80}     // 信息区9: 80×80
     };
 
     // 每个信息区最多能存储的字节数
@@ -83,91 +99,199 @@ namespace decode {
         return bit ^ ((seed >> 8) & 1);
     }
 
-    // 读取帧标志位
+    // 读取帧标志位（使用投票机制）
     bool readFrameFlag(const cv::Mat& frame, bool& isStart, bool& isEnd) {
-        const int fixed_col = 87;
+        const int fixed_col = 870;
 
-        cv::Vec3b flag[4];
-        for (int i = 0; i < 4; i++) {
-            flag[i] = frame.at<cv::Vec3b>(i + 2, fixed_col);
+        // 检查边界
+        if (frame.rows < 60 || frame.cols <= fixed_col + 10) {
+            return false;
         }
 
-        bool b0 = isBlack(flag[0]);
-        bool b1 = isBlack(flag[1]);
-        bool b2 = isBlack(flag[2]);
-        bool b3 = isBlack(flag[3]);
+        // 每个像素块的大小（10x10）
+        const int block_size = 10;
+        bool flag[4];
+
+        for (int i = 0; i < 4; i++) {
+            int black_count = 0;
+            int total_count = 0;
+
+            // 统计10x10区域内的黑色像素数
+            for (int r = 0; r < block_size; r++) {
+                for (int c = 0; c < block_size; c++) {
+                    int row = i * block_size + 20 + r;
+                    int col = fixed_col + c;
+                    if (row < frame.rows && col < frame.cols) {
+                        if (isBlack(frame, row, col)) {
+                            black_count++;
+                        }
+                        total_count++;
+                    }
+                }
+            }
+
+            // 投票决定该位的值
+            flag[i] = (black_count > total_count / 2);
+        }
+
+        bool b0 = flag[0];
+        bool b1 = flag[1];
+        bool b2 = flag[2];
+        bool b3 = flag[3];
+
+        DECODE_DBG("[DEBUG] Frame flag bits: " << b0 << " " << b1 << " " << b2 << " " << b3);
 
         // 黑白白黑: 起始帧
         if (b0 && !b1 && !b2 && b3) {
             isStart = true;
             isEnd = false;
+            DECODE_DBG("[DEBUG] Frame flag: Start frame");
             return true;
         }
         // 黑白黑白: 中间帧
         else if (b0 && !b1 && b2 && !b3) {
             isStart = false;
             isEnd = false;
+            DECODE_DBG("[DEBUG] Frame flag: Middle frame");
             return true;
         }
         // 白黑黑白: 终止帧
         else if (!b0 && b1 && b2 && !b3) {
             isStart = false;
             isEnd = true;
+            DECODE_DBG("[DEBUG] Frame flag: End frame");
             return true;
         }
         // 白黑白黑: 单帧(既是起始也是终止)
         else if (!b0 && b1 && !b2 && b3) {
             isStart = true;
             isEnd = true;
+            DECODE_DBG("[DEBUG] Frame flag: Single frame");
             return true;
         }
 
+        DECODE_DBG("[DEBUG] Frame flag: Invalid pattern");
         return false;
     }
 
-    // 读取帧编号
+    // 读取帧编号（使用投票机制）
     uint16_t readFrameNumber(const cv::Mat& frame) {
-        const int fixed_col = 88;
+        const int fixed_col = 880;
         uint16_t number = 0;
 
+        // 检查边界
+        if (frame.rows < 180 || frame.cols <= fixed_col + 10) {
+            return 0;
+        }
+
+        // 每个像素块的大小（10x10）
+        const int block_size = 10;
+
         for (int i = 0; i < 16; i++) {
-            cv::Vec3b pixel = frame.at<cv::Vec3b>(i + 2, fixed_col);
-            bool bit = isBlack(pixel);
+            int black_count = 0;
+            int total_count = 0;
+
+            // 统计10x10区域内的黑色像素数
+            for (int r = 0; r < block_size; r++) {
+                for (int c = 0; c < block_size; c++) {
+                    int row = i * block_size + 20 + r;
+                    int col = fixed_col + c;
+                    if (row < frame.rows && col < frame.cols) {
+                        if (isBlack(frame, row, col)) {
+                            black_count++;
+                        }
+                        total_count++;
+                    }
+                }
+            }
+
+            // 投票决定该位的值
+            bool bit = (black_count > total_count / 2);
             number |= (bit ? 1 : 0) << i;
         }
 
         return number;
     }
 
-    // 读取校验码
+    // 读取校验码（使用投票机制）
     uint16_t readCheckCode(const cv::Mat& frame) {
-        const int fixed_col = 89;
+        const int fixed_col = 890;
         uint16_t code = 0;
 
+        // 检查边界
+        if (frame.rows < 180 || frame.cols <= fixed_col + 10) {
+            return 0;
+        }
+
+        // 每个像素块的大小（10x10）
+        const int block_size = 10;
+
         for (int i = 0; i < 16; i++) {
-            cv::Vec3b pixel = frame.at<cv::Vec3b>(i + 2, fixed_col);
-            bool bit = isBlack(pixel);
+            int black_count = 0;
+            int total_count = 0;
+
+            // 统计10x10区域内的黑色像素数
+            for (int r = 0; r < block_size; r++) {
+                for (int c = 0; c < block_size; c++) {
+                    int row = i * block_size + 20 + r;
+                    int col = fixed_col + c;
+                    if (row < frame.rows && col < frame.cols) {
+                        if (isBlack(frame, row, col)) {
+                            black_count++;
+                        }
+                        total_count++;
+                    }
+                }
+            }
+
+            // 投票决定该位的值
+            bool bit = (black_count > total_count / 2);
             code |= (bit ? 1 : 0) << i;
         }
 
         return code;
     }
 
-    // 读取数据长度
+    // 读取数据长度（使用投票机制）
     int readDataLength(const cv::Mat& frame) {
-        const int fixed_col = 87;
+        const int fixed_col = 870;
         int length = 0;
 
+        // 检查边界
+        if (frame.rows < 180 || frame.cols <= fixed_col + 10) {
+            return 0;
+        }
+
+        // 每个像素块的大小（10x10）
+        const int block_size = 10;
+
         for (int i = 0; i < 12; i++) {
-            cv::Vec3b pixel = frame.at<cv::Vec3b>(i + 6, fixed_col);
-            bool bit = isBlack(pixel);
+            int black_count = 0;
+            int total_count = 0;
+
+            // 统计10x10区域内的黑色像素数
+            for (int r = 0; r < block_size; r++) {
+                for (int c = 0; c < block_size; c++) {
+                    int row = i * block_size + 60 + r;
+                    int col = fixed_col + c;
+                    if (row < frame.rows && col < frame.cols) {
+                        if (isBlack(frame, row, col)) {
+                            black_count++;
+                        }
+                        total_count++;
+                    }
+                }
+            }
+
+            // 投票决定该位的值
+            bool bit = (black_count > total_count / 2);
             length |= (bit ? 1 : 0) << i;
         }
 
         return length;
     }
 
-    // 读取信息区数据
+    // 读取信息区数据（使用投票机制）
     bool readInfoData(const cv::Mat& frame, int areaId, int len, unsigned char* output) {
         if (areaId < 0 || areaId >= 10 || len <= 0) {
             return false;
@@ -178,18 +302,39 @@ namespace decode {
         int rows = INFO_AREA_SIZE[areaId][2];
         int cols = INFO_AREA_SIZE[areaId][3];
 
+        // 检查边界
+        if (frame.rows < start_x + rows || frame.cols < start_y + cols) {
+            return false;
+        }
+
         int total_bits = len * 8;
         int bit_index = 0;
 
-        for (int row = 0; row < rows; row++) {
-            for (int col = 0; col < cols; col++) {
+        // 每个像素块的大小（10x10）
+        const int block_size = 10;
+
+        for (int row = 0; row < rows; row += block_size) {
+            for (int col = 0; col < cols; col += block_size) {
                 if (bit_index >= total_bits) {
                     break;
                 }
 
-                cv::Vec3b pixel = frame.at<cv::Vec3b>(start_x + row, start_y + col);
-                int bit = isBlack(pixel) ? 1 : 0;
-                int original_bit = randomizeBit(bit, areaId, row, col);
+                // 投票机制：统计10x10区域内的黑色像素数
+                int black_count = 0;
+                int total_count = 0;
+
+                for (int r = 0; r < block_size && row + r < rows; r++) {
+                    for (int c = 0; c < block_size && col + c < cols; c++) {
+                        if (isBlack(frame, start_x + row + r, start_y + col + c)) {
+                            black_count++;
+                        }
+                        total_count++;
+                    }
+                }
+
+                // 投票决定该位的值
+                bool bit = (black_count > total_count / 2);
+                int original_bit = randomizeBit(bit, areaId, row / block_size, col / block_size);
 
                 int byte_index = bit_index / 8;
                 int bit_offset = 7 - (bit_index % 8);
