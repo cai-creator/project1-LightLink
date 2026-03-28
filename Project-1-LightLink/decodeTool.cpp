@@ -105,17 +105,18 @@ namespace decode {
     }
 
     // 投票判断函数：返回投票结果和置信度
-    // 置信度 = |black_ratio - 0.5|，值越大表示越确定
-    // threshold: 判定为黑色的阈值（0.0-1.0），默认0.5
-    inline std::pair<bool, float> voteBit(int black_count, int total_count, float threshold = 0.5f) {
-        float ratio = (float)black_count / total_count;
-        bool isBlack = ratio > threshold;
-        float confidence = std::abs(ratio - 0.5f);
+    // 使用相对阈值，比平均值暗就是黑
+    inline std::pair<bool, float> voteBit(int gray_sum, int total_count, float frame_avg_gray) {
+        float avg_gray = (float)gray_sum / total_count;
+        // 使用相对阈值：比帧平均灰度暗就是黑
+        bool isBlack = avg_gray < frame_avg_gray;
+        // 计算置信度：灰度差越大，置信度越高
+        float confidence = std::abs(avg_gray - frame_avg_gray) / 255.0f;
         return {isBlack, confidence};
     }
 
-    // 使用指定阈值读取信息区数据
-    bool readInfoDataWithThreshold(const cv::Mat& frame, int areaId, int len, unsigned char* output, float threshold) {
+    // 使用帧平均灰度读取信息区数据
+    bool readInfoDataWithThreshold(const cv::Mat& frame, int areaId, int len, unsigned char* output, float frame_avg_gray) {
         if (areaId < 0 || areaId >= 10 || len <= 0) {
             return false;
         }
@@ -142,21 +143,27 @@ namespace decode {
                     break;
                 }
 
-                // 投票机制：统计10x10区域内的黑色像素数
-                int black_count = 0;
+                // 投票机制：统计10x10区域内的灰度值总和
+                int gray_sum = 0;
                 int total_count = 0;
 
                 for (int r = 0; r < block_size && row + r < rows; r++) {
                     for (int c = 0; c < block_size && col + c < cols; c++) {
-                        if (isBlack(frame, start_x + row + r, start_y + col + c)) {
-                            black_count++;
+                        int pixel_row = start_x + row + r;
+                        int pixel_col = start_y + col + c;
+                        if (frame.channels() == 3) {
+                            cv::Vec3b pixel = frame.at<cv::Vec3b>(pixel_row, pixel_col);
+                            gray_sum += (pixel[0] + pixel[1] + pixel[2]) / 3;
+                        } else if (frame.channels() == 1) {
+                            uchar pixel = frame.at<uchar>(pixel_row, pixel_col);
+                            gray_sum += pixel;
                         }
                         total_count++;
                     }
                 }
 
-                // 使用指定的阈值进行投票
-                bool bit = voteBit(black_count, total_count, threshold).first;
+                // 使用帧平均灰度进行投票
+                bool bit = voteBit(gray_sum, total_count, frame_avg_gray).first;
                 int original_bit = randomizeBit(bit, areaId, row / block_size, col / block_size);
 
                 int byte_index = bit_index / 8;
@@ -175,7 +182,7 @@ namespace decode {
     }
 
     // 读取帧标志位（使用投票机制）
-    bool readFrameFlag(const cv::Mat& frame, bool& isStart, bool& isEnd) {
+    bool readFrameFlag(const cv::Mat& frame, bool& isStart, bool& isEnd, float frame_avg_gray) {
         const int fixed_col = 870;
 
         // 检查边界
@@ -189,17 +196,21 @@ namespace decode {
         float confidence[4];
 
         for (int i = 0; i < 4; i++) {
-            int black_count = 0;
+            int gray_sum = 0;
             int total_count = 0;
 
-            // 统计10x10区域内的黑色像素数
+            // 统计10x10区域内的灰度值总和
             for (int r = 0; r < block_size; r++) {
                 for (int c = 0; c < block_size; c++) {
                     int row = i * block_size + 20 + r;
                     int col = fixed_col + c;
                     if (row < frame.rows && col < frame.cols) {
-                        if (isBlack(frame, row, col)) {
-                            black_count++;
+                        if (frame.channels() == 3) {
+                            cv::Vec3b pixel = frame.at<cv::Vec3b>(row, col);
+                            gray_sum += (pixel[0] + pixel[1] + pixel[2]) / 3;
+                        } else if (frame.channels() == 1) {
+                            uchar pixel = frame.at<uchar>(row, col);
+                            gray_sum += pixel;
                         }
                         total_count++;
                     }
@@ -207,7 +218,7 @@ namespace decode {
             }
 
             // 投票决定该位的值，并记录置信度
-            auto result = voteBit(black_count, total_count);
+            auto result = voteBit(gray_sum, total_count, frame_avg_gray);
             flag[i] = result.first;
             confidence[i] = result.second;
         }
@@ -259,7 +270,7 @@ namespace decode {
     }
 
     // 读取帧编号（使用投票机制）
-    uint16_t readFrameNumber(const cv::Mat& frame) {
+    uint16_t readFrameNumber(const cv::Mat& frame, float frame_avg_gray) {
         const int fixed_col = 880;
         uint16_t number = 0;
 
@@ -272,17 +283,21 @@ namespace decode {
         const int block_size = 10;
 
         for (int i = 0; i < 16; i++) {
-            int black_count = 0;
+            int gray_sum = 0;
             int total_count = 0;
 
-            // 统计10x10区域内的黑色像素数
+            // 统计10x10区域内的灰度值总和
             for (int r = 0; r < block_size; r++) {
                 for (int c = 0; c < block_size; c++) {
                     int row = i * block_size + 20 + r;
                     int col = fixed_col + c;
                     if (row < frame.rows && col < frame.cols) {
-                        if (isBlack(frame, row, col)) {
-                            black_count++;
+                        if (frame.channels() == 3) {
+                            cv::Vec3b pixel = frame.at<cv::Vec3b>(row, col);
+                            gray_sum += (pixel[0] + pixel[1] + pixel[2]) / 3;
+                        } else if (frame.channels() == 1) {
+                            uchar pixel = frame.at<uchar>(row, col);
+                            gray_sum += pixel;
                         }
                         total_count++;
                     }
@@ -290,7 +305,7 @@ namespace decode {
             }
 
             // 使用改进的投票机制
-            bool bit = voteBit(black_count, total_count).first;
+            bool bit = voteBit(gray_sum, total_count, frame_avg_gray).first;
             number |= (bit ? 1 : 0) << i;
         }
 
@@ -298,7 +313,7 @@ namespace decode {
     }
 
     // 读取校验码（使用投票机制）
-    uint16_t readCheckCode(const cv::Mat& frame) {
+    uint16_t readCheckCode(const cv::Mat& frame, float frame_avg_gray) {
         const int fixed_col = 890;
         uint16_t code = 0;
 
@@ -311,17 +326,21 @@ namespace decode {
         const int block_size = 10;
 
         for (int i = 0; i < 16; i++) {
-            int black_count = 0;
+            int gray_sum = 0;
             int total_count = 0;
 
-            // 统计10x10区域内的黑色像素数
+            // 统计10x10区域内的灰度值总和
             for (int r = 0; r < block_size; r++) {
                 for (int c = 0; c < block_size; c++) {
                     int row = i * block_size + 20 + r;
                     int col = fixed_col + c;
                     if (row < frame.rows && col < frame.cols) {
-                        if (isBlack(frame, row, col)) {
-                            black_count++;
+                        if (frame.channels() == 3) {
+                            cv::Vec3b pixel = frame.at<cv::Vec3b>(row, col);
+                            gray_sum += (pixel[0] + pixel[1] + pixel[2]) / 3;
+                        } else if (frame.channels() == 1) {
+                            uchar pixel = frame.at<uchar>(row, col);
+                            gray_sum += pixel;
                         }
                         total_count++;
                     }
@@ -329,7 +348,7 @@ namespace decode {
             }
 
             // 使用改进的投票机制
-            bool bit = voteBit(black_count, total_count).first;
+            bool bit = voteBit(gray_sum, total_count, frame_avg_gray).first;
             code |= (bit ? 1 : 0) << i;
         }
 
@@ -337,7 +356,7 @@ namespace decode {
     }
 
     // 读取数据长度（使用投票机制）
-    int readDataLength(const cv::Mat& frame) {
+    int readDataLength(const cv::Mat& frame, float frame_avg_gray) {
         const int fixed_col = 870;
         int length = 0;
 
@@ -350,17 +369,21 @@ namespace decode {
         const int block_size = 10;
 
         for (int i = 0; i < 12; i++) {
-            int black_count = 0;
+            int gray_sum = 0;
             int total_count = 0;
 
-            // 统计10x10区域内的黑色像素数
+            // 统计10x10区域内的灰度值总和
             for (int r = 0; r < block_size; r++) {
                 for (int c = 0; c < block_size; c++) {
                     int row = i * block_size + 60 + r;
                     int col = fixed_col + c;
                     if (row < frame.rows && col < frame.cols) {
-                        if (isBlack(frame, row, col)) {
-                            black_count++;
+                        if (frame.channels() == 3) {
+                            cv::Vec3b pixel = frame.at<cv::Vec3b>(row, col);
+                            gray_sum += (pixel[0] + pixel[1] + pixel[2]) / 3;
+                        } else if (frame.channels() == 1) {
+                            uchar pixel = frame.at<uchar>(row, col);
+                            gray_sum += pixel;
                         }
                         total_count++;
                     }
@@ -368,7 +391,7 @@ namespace decode {
             }
 
             // 使用改进的投票机制
-            bool bit = voteBit(black_count, total_count).first;
+            bool bit = voteBit(gray_sum, total_count, frame_avg_gray).first;
             length |= (bit ? 1 : 0) << i;
         }
 
@@ -376,7 +399,7 @@ namespace decode {
     }
 
     // 读取信息区数据（使用投票机制）
-    bool readInfoData(const cv::Mat& frame, int areaId, int len, unsigned char* output) {
+    bool readInfoData(const cv::Mat& frame, int areaId, int len, unsigned char* output, float frame_avg_gray) {
         if (areaId < 0 || areaId >= 10 || len <= 0) {
             return false;
         }
@@ -403,21 +426,27 @@ namespace decode {
                     break;
                 }
 
-                // 投票机制：统计10x10区域内的黑色像素数
-                int black_count = 0;
+                // 投票机制：统计10x10区域内的灰度值总和
+                int gray_sum = 0;
                 int total_count = 0;
 
                 for (int r = 0; r < block_size && row + r < rows; r++) {
                     for (int c = 0; c < block_size && col + c < cols; c++) {
-                        if (isBlack(frame, start_x + row + r, start_y + col + c)) {
-                            black_count++;
+                        int pixel_row = start_x + row + r;
+                        int pixel_col = start_y + col + c;
+                        if (frame.channels() == 3) {
+                            cv::Vec3b pixel = frame.at<cv::Vec3b>(pixel_row, pixel_col);
+                            gray_sum += (pixel[0] + pixel[1] + pixel[2]) / 3;
+                        } else if (frame.channels() == 1) {
+                            uchar pixel = frame.at<uchar>(pixel_row, pixel_col);
+                            gray_sum += pixel;
                         }
                         total_count++;
                     }
                 }
 
                 // 使用改进的投票机制
-                bool bit = voteBit(black_count, total_count).first;
+                bool bit = voteBit(gray_sum, total_count, frame_avg_gray).first;
                 int original_bit = randomizeBit(bit, areaId, row / block_size, col / block_size);
 
                 int byte_index = bit_index / 8;
@@ -488,24 +517,24 @@ namespace decode {
         return calcCode == info.CheckCode;
     }
 
-    // 使用指定阈值解码单帧
-    bool decodeFrameWithThreshold(const cv::Mat& frame, ImageInfo& info, float threshold) {
+    // 使用帧平均灰度解码单帧
+    bool decodeFrameWithThreshold(const cv::Mat& frame, ImageInfo& info, float frame_avg_gray) {
         // 读取帧标志位
-        if (!readFrameFlag(frame, info.IsStart, info.IsEnd)) {
+        if (!readFrameFlag(frame, info.IsStart, info.IsEnd, frame_avg_gray)) {
             return false;
         }
 
         // 读取帧编号
-        info.FrameBase = readFrameNumber(frame);
+        info.FrameBase = readFrameNumber(frame, frame_avg_gray);
 
         // 读取校验码
-        info.CheckCode = readCheckCode(frame);
+        info.CheckCode = readCheckCode(frame, frame_avg_gray);
 
         // 读取数据长度
-        int dataLength = readDataLength(frame);
+        int dataLength = readDataLength(frame, frame_avg_gray);
         info.dataLength = dataLength;
 
-        // 读取10个信息区的数据（使用指定阈值）
+        // 读取10个信息区的数据（使用帧平均灰度）
         info.Info.resize(dataLength, 0);
         int offset = 0;
         int remainingLength = dataLength;
@@ -514,12 +543,33 @@ namespace decode {
             int len = std::min(LEN_MIN[i], remainingLength);
             if (len <= 0) break;
 
-            readInfoDataWithThreshold(frame, i, len, info.Info.data() + offset, threshold);
+            readInfoDataWithThreshold(frame, i, len, info.Info.data() + offset, frame_avg_gray);
             remainingLength -= len;
             offset += len;
         }
 
         return true;
+    }
+
+    // 计算帧的平均灰度值
+    float calculateFrameAvgGray(const cv::Mat& frame) {
+        int total_gray = 0;
+        int total_pixels = 0;
+        
+        for (int row = 0; row < frame.rows; row++) {
+            for (int col = 0; col < frame.cols; col++) {
+                if (frame.channels() == 3) {
+                    cv::Vec3b pixel = frame.at<cv::Vec3b>(row, col);
+                    total_gray += (pixel[0] + pixel[1] + pixel[2]) / 3;
+                } else if (frame.channels() == 1) {
+                    uchar pixel = frame.at<uchar>(row, col);
+                    total_gray += pixel;
+                }
+                total_pixels++;
+            }
+        }
+        
+        return total_pixels > 0 ? (float)total_gray / total_pixels : 128.0f;
     }
 
     // 解码单张二维码图片（带多阈值重试机制）
@@ -530,22 +580,52 @@ namespace decode {
             return false;
         }
 
-        // 尝试不同的阈值
-        float thresholds[] = {0.5f, 0.45f, 0.55f, 0.4f, 0.6f};
+        // 计算帧的平均灰度值
+        float avg_gray = calculateFrameAvgGray(frame);
+        float normalized_avg_gray = avg_gray / 255.0f;
         
-        for (float threshold : thresholds) {
-            ImageInfo tempInfo;
-            if (decodeFrameWithThreshold(frame, tempInfo, threshold)) {
-                // 验证CRC
-                if (verifyCheckCode(tempInfo)) {
-                    info = tempInfo;
-                    DECODE_DBG("[DEBUG] Decoded with threshold=" << threshold);
+        // 计算整体置信度（暂时注释掉判废逻辑）
+        // float overall_confidence = std::abs(normalized_avg_gray - 0.5f);
+        // 
+        // // 如果整体置信度太低，直接丢弃这一帧
+        // if (overall_confidence < 0.3f) {
+        //     DECODE_DBG("[DEBUG] Frame discarded due to low overall confidence: " << overall_confidence);
+        //     return false;
+        // }
+
+        // 不再需要动态调整阈值，直接使用帧平均灰度
+        
+        // 直接使用帧平均灰度进行解码
+        ImageInfo tempInfo;
+        if (decodeFrameWithThreshold(frame, tempInfo, avg_gray)) {
+            // 验证CRC
+            if (verifyCheckCode(tempInfo)) {
+                info = tempInfo;
+                DECODE_DBG("[DEBUG] Decoded with frame_avg_gray=" << avg_gray);
+                return true;
+            } else {
+                DECODE_DBG("[DEBUG] CRC verification failed");
+            }
+        }
+
+        // 尝试使用不同的帧平均灰度偏移
+        float offsets[] = {-10.0f, -5.0f, 5.0f, 10.0f};
+        for (float offset : offsets) {
+            float adjusted_avg_gray = avg_gray + offset;
+            if (adjusted_avg_gray < 0) adjusted_avg_gray = 0;
+            if (adjusted_avg_gray > 255) adjusted_avg_gray = 255;
+            
+            ImageInfo tempInfo2;
+            if (decodeFrameWithThreshold(frame, tempInfo2, adjusted_avg_gray)) {
+                if (verifyCheckCode(tempInfo2)) {
+                    info = tempInfo2;
+                    DECODE_DBG("[DEBUG] Decoded with adjusted frame_avg_gray=" << adjusted_avg_gray);
                     return true;
                 }
             }
         }
 
-        // 所有阈值都失败，使用默认阈值0.5返回结果（让上层决定是否接受）
-        return decodeFrameWithThreshold(frame, info, 0.5f);
+        // 失败时使用默认方式返回结果
+        return decodeFrameWithThreshold(frame, info, avg_gray);
     }
 }

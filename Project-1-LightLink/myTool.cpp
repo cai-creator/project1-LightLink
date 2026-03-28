@@ -150,6 +150,7 @@ void decodeEXE(std::string video_path, std::string output_path) {
 
 	std::vector<unsigned char> outputData;
 
+	// 按帧编号顺序合并数据
 	for (auto& pair : frameMap) {
 		ImageInfo& info = pair.second;
 		outputData.insert(outputData.end(), info.Info.begin(), info.Info.end());
@@ -175,12 +176,42 @@ void decodeEXE(std::string video_path, std::string output_path) {
 	// 只取原始图片大小的数据（忽略填充）
 	int saveSize = std::min((int)outputData.size(), EXPECTED_SIZE);
 
+	// 检查数据完整性
+	if (outputData.size() < EXPECTED_SIZE) {
+		std::cout << "Warning: Insufficient data. Expected " << EXPECTED_SIZE << " bytes, got " << outputData.size() << " bytes." << std::endl;
+		// 填充剩余数据为黑色
+		outputData.resize(EXPECTED_SIZE, 0);
+		saveSize = EXPECTED_SIZE;
+	}
+
+	// 验证数据是否有效
+	bool dataValid = true;
+	int zeroCount = 0;
+	for (size_t i = 0; i < std::min((size_t)1000, outputData.size()); i++) {
+		if (outputData[i] == 0) zeroCount++;
+	}
+	if (zeroCount > 900) {
+		std::cout << "Warning: Too many zero bytes in data, possible decoding error." << std::endl;
+		dataValid = false;
+	}
+
+	// 显示数据统计信息
+	int minVal = 255, maxVal = 0;
+	for (size_t i = 0; i < std::min((size_t)1000, outputData.size()); i++) {
+		if (outputData[i] < minVal) minVal = outputData[i];
+		if (outputData[i] > maxVal) maxVal = outputData[i];
+	}
+	std::cout << "Data range: " << minVal << " - " << maxVal << std::endl;
+
 	Mat decodedImg(DECODED_HEIGHT, DECODED_WIDTH, CV_8UC3);
 	memcpy(decodedImg.data, outputData.data(), saveSize);
 
 	// 直接保存，不需要通道转换
 	if (imwrite(output_path, decodedImg)) {
 		std::cout << "Image saved to: " << output_path << std::endl;
+		if (!dataValid) {
+			std::cout << "Note: Image saved but data may be corrupted." << std::endl;
+		}
 	}
 	else {
 		std::cerr << "Failed to save image" << std::endl;

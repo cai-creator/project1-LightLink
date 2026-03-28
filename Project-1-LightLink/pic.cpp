@@ -515,26 +515,33 @@ namespace ImgPraseV2 {
 	// ==================== 预处理函数 ====================
 
 	/**
-	 * @brief 使用OTSU算法的图像预处理
-	 * @param srcImg 源彩色图像
-	 * @param blurRate 模糊率(默认0.0005)
-	 * @return 二值化图像
-	 * @details 处理流程：灰度化 -> 高斯模糊 -> OTSU二值化
-	 */
-	Mat preprocessImgV2_OTSU(const Mat& srcImg, float blurRate) {
-		Mat tempImg;
-		// 1. 灰度化
-		cvtColor(srcImg, tempImg, COLOR_BGR2GRAY);
+     * @brief 使用OTSU算法的图像预处理
+     * @param srcImg 源彩色图像
+     * @param blurRate 模糊率(默认0.0005)
+     * @return 二值化图像
+     * @details 处理流程：灰度化 -> 非局部均值去噪 -> 中值滤波 -> OTSU二值化
+     */
+    Mat preprocessImgV2_OTSU(const Mat& srcImg, float blurRate) {
+        Mat tempImg;
+        // 1. 灰度化
+        cvtColor(srcImg, tempImg, COLOR_BGR2GRAY);
 
-		// 2. 高斯模糊，减少高频干扰(如摩尔纹)
-		float BlurSize = 1.0f + srcImg.rows * blurRate;
-		if (BlurSize < 1.0f) BlurSize = 1.0f;
-		blur(tempImg, tempImg, Size2f(BlurSize, BlurSize));
+        // 2. 非局部均值去噪，保留边缘
+        Mat denoisedImg;
+        fastNlMeansDenoising(tempImg, denoisedImg, 30, 7, 21);
 
-		// 3. OTSU自动阈值二值化
-		threshold(tempImg, tempImg, 0, 255, THRESH_BINARY | THRESH_OTSU);
-		return tempImg;
-	}
+        // 3. 中值滤波，去除摩尔纹和椒盐噪声
+        medianBlur(denoisedImg, tempImg, 3);
+
+        // 4. 高斯模糊，进一步减少高频干扰
+        float BlurSize = 1.0f + srcImg.rows * blurRate;
+        if (BlurSize < 1.0f) BlurSize = 1.0f;
+        blur(tempImg, tempImg, Size2f(BlurSize, BlurSize));
+
+        // 5. OTSU自动阈值二值化
+        threshold(tempImg, tempImg, 0, 255, THRESH_BINARY | THRESH_OTSU);
+        return tempImg;
+    }
 
 	/**
 	 * @brief 使用自适应阈值的图像预处理
