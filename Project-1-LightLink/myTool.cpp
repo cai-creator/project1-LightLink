@@ -109,9 +109,9 @@ void decodeEXE(std::string video_path, std::string output_path) {
 
 			// 保存1080x1080图像
 			if (!resizedFrame.empty()) {
-				std::string resizedPath = mid + "\resized_frame" + std::to_string(i) + ".png";
-				imwrite(resizedPath, resizedFrame);
-			}
+					std::string resizedPath = mid + "\\resized_frame" + std::to_string(i) + ".png";
+					imwrite(resizedPath, resizedFrame);
+				}
 
 			// 解码单帧
 			ImageInfo info;
@@ -131,76 +131,14 @@ void decodeEXE(std::string video_path, std::string output_path) {
 				// 	std::cout << " [CHECK FAILED]" << std::endl;
 				// }
 			} else {
-				// 处理后的帧解码失败，尝试使用原始帧
-		std::cout << "Frame " << i << ": Processed frame failed, trying original frame" << std::endl;
-		
-		// 将原始图像调整为1080x1080
-		Mat resizedFrame;
-		resize(frame, resizedFrame, Size(1080, 1080), 0, 0, INTER_NEAREST);
-
-			// 保存1080x1080图像
-			if (!resizedFrame.empty()) {
-				std::string resizedPath = mid + "\\resized_frame" + std::to_string(i) + "_original.png";
-				imwrite(resizedPath, resizedFrame);
-			}
-
-			// 解码单帧
-			ImageInfo info;
-			if (decodeFrame(resizedFrame, info)) {
-				decode_success_count++;
-				frameMap[info.FrameBase] = info;
-
-				std::cout << "Frame " << i << ": No." << info.FrameBase
-					<< " Start=" << info.IsStart << " End=" << info.IsEnd
-					<< " CheckCode=" << info.CheckCode;
-
-				// 校验（暂时禁用）
-				// if (verifyCheckCode(info)) {
-				std::cout << " [OK]" << std::endl;
-				// }
-				// else {
-				// 	std::cout << " [CHECK FAILED]" << std::endl;
-				// }
-			} else {
+				// 处理后的帧解码失败，直接标记为失败
 				decode_fail_count++;
 				std::cerr << "Frame " << i << ": Decode failed (Invalid frame flag)" << std::endl;
-			}
 			}
 		} else {
-			// 预处理失败，使用原始帧
-		std::cout << "Frame " << i << ": Using original frame for decoding" << std::endl;
-
-		// 将原始图像调整为1080x1080
-		Mat resizedFrame;
-		resize(frame, resizedFrame, Size(1080, 1080), 0, 0, INTER_NEAREST);
-
-			// 保存1080x1080图像
-			if (!resizedFrame.empty()) {
-				std::string resizedPath = mid + "\\resized_frame" + std::to_string(i) + "_original.png";
-				imwrite(resizedPath, resizedFrame);
-			}
-
-			// 解码单帧
-			ImageInfo info;
-			if (decodeFrame(resizedFrame, info)) {
-				decode_success_count++;
-				frameMap[info.FrameBase] = info;
-
-				std::cout << "Frame " << i << ": No." << info.FrameBase
-					<< " Start=" << info.IsStart << " End=" << info.IsEnd
-					<< " CheckCode=" << info.CheckCode;
-
-				// 校验（暂时禁用）
-				// if (verifyCheckCode(info)) {
-				std::cout << " [OK]" << std::endl;
-				// }
-				// else {
-				// 	std::cout << " [CHECK FAILED]" << std::endl;
-				// }
-			} else {
-				decode_fail_count++;
-				std::cerr << "Frame " << i << ": Decode failed (Invalid frame flag)" << std::endl;
-			}
+			// 预处理失败，跳过此帧
+			decode_fail_count++;
+			std::cerr << "Frame " << i << ": Preprocessing failed, skipping frame" << std::endl;
 		}
 	}
 	std::cout << "Step 3: Decode success: " << decode_success_count << ", Failed: " << decode_fail_count << std::endl;
@@ -251,9 +189,23 @@ void decodeEXE(std::string video_path, std::string output_path) {
 
 
 int main(int argc, char* argv[]) {
-	// 测试模式：使用固定路径
-	std::string source_path = "output/15.mp4";
-	std::string target_path = "output/decoded_test.png";
+	std::string source_path, target_path;
+
+	// 从命令行参数获取路径
+	if (argc >= 3) {
+		source_path = argv[1];
+		target_path = argv[2];
+		std::cout << "Using command line arguments: " << std::endl;
+		std::cout << "Source path: " << source_path << std::endl;
+		std::cout << "Target path: " << target_path << std::endl;
+	} else {
+		// 手动输入路径
+		std::cout << "Please enter paths manually:" << std::endl;
+		std::cout << "Enter source path: ";
+		std::getline(std::cin, source_path);
+		std::cout << "Enter target path: ";
+		std::getline(std::cin, target_path);
+	}
 
 #ifdef _ENCODE
 	encodeEXE(source_path, target_path);

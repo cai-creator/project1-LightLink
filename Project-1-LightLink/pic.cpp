@@ -1026,17 +1026,27 @@ namespace ImgPraseV2 {
 		float blurRates[] = { 0.0005f, 0.0000f, 0.00025f, 0.001f, 0.0001f };
 
 		for (int i = 0; i < 5; i++) {
-			// 预处理：灰度化 -> 模糊 -> 二值化
-			Mat binaryImg = preprocessImgV2_OTSU(srcImg, blurRates[i]);
+				// 预处理：使用组合方法处理图像
+				Mat binaryImg;
+				if (i == 0) {
+					// 组合预处理方法
+					binaryImg = preprocessImgV2_Combined(srcImg);
+				} else {
+					// 尝试不同的模糊率
+					binaryImg = preprocessImgV2_OTSU(srcImg, blurRates[i]);
+				}
 
-			// 保存调试图像
-			if (!debugPath.empty() && i == 0) {
-				imwrite(debugPath + "_0_binary.png", binaryImg);
-			}
+				// 保存调试图像
+				if (!debugPath.empty() && i == 0) {
+					imwrite(debugPath + "_0_binary.png", binaryImg);
+				}
 
-			qrPoints.clear();
-			// 查找定位点
-			if (findPositionPoints(binaryImg, qrPoints)) {
+				// 应用形态学操作去除噪声
+				binaryImg = preprocessImgV2_Morphology(binaryImg);
+
+				qrPoints.clear();
+				// 查找定位点
+				if (findPositionPoints(binaryImg, qrPoints)) {
 				if (qrPoints.size() >= 3) {
 					// 保存定位点调试图像
 			if (!debugPath.empty()) {
@@ -1119,9 +1129,14 @@ namespace ImgPraseV2 {
 							grayCrop = finalCrop.clone();
 						}
 
-						// 二值化
+						// 二值化 - 使用OTSU算法自动阈值
 						Mat binaryCrop;
-						threshold(grayCrop, binaryCrop, 127, 255, THRESH_BINARY);
+						threshold(grayCrop, binaryCrop, 0, 255, THRESH_BINARY | THRESH_OTSU);
+						
+						// 应用形态学操作去除噪声
+						Mat kernel = getStructuringElement(MORPH_RECT, Size(3, 3));
+						morphologyEx(binaryCrop, binaryCrop, MORPH_CLOSE, kernel);
+						morphologyEx(binaryCrop, binaryCrop, MORPH_OPEN, kernel);
 
 						// 确保最终输出为1080x1080
 						if (binaryCrop.size() != Size(1080, 1080)) {

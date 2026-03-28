@@ -4,6 +4,9 @@
 #include <iostream>
 #include <sstream>
 #include <cstring>
+#include <algorithm>
+#include <cmath>
+#include <utility>
 
 #define DECODE_DEBUG 1
 
@@ -39,14 +42,16 @@ namespace decode {
         cv::Vec3b(0, 0, 0)         // 黑色，像素值为1
     };
 
-    // 判断像素是黑色还是白色（灰度阈值，用于处理JPEG压缩后的质量损失）
+    // 判断像素是黑色还是白色
+    // 预处理后应该是二值图像（0或255），但保留阈值判断作为备用
+    // 对于手机拍摄的残影，使用更激进的阈值
     inline bool isBlack(const cv::Mat& frame, int row, int col) {
         if (frame.channels() == 3) {
             // 彩色图像
             cv::Vec3b pixel = frame.at<cv::Vec3b>(row, col);
             return (pixel[0] + pixel[1] + pixel[2]) / 3 < 128;
         } else if (frame.channels() == 1) {
-            // 灰度图像
+            // 灰度图像（预处理后应该是二值的）
             uchar pixel = frame.at<uchar>(row, col);
             return pixel < 128;
         }
@@ -59,7 +64,7 @@ namespace decode {
             cv::Vec3b pixel = frame.at<cv::Vec3b>(row, col);
             return (pixel[0] + pixel[1] + pixel[2]) / 3 >= 128;
         } else if (frame.channels() == 1) {
-            // 灰度图像
+            // 灰度图像（预处理后应该是二值的）
             uchar pixel = frame.at<uchar>(row, col);
             return pixel >= 128;
         }
@@ -99,6 +104,76 @@ namespace decode {
         return bit ^ ((seed >> 8) & 1);
     }
 
+    // 投票判断函数：返回投票结果和置信度
+    // 置信度 = |black_ratio - 0.5|，值越大表示越确定
+    // threshold: 判定为黑色的阈值（0.0-1.0），默认0.5
+    inline std::pair<bool, float> voteBit(int black_count, int total_count, float threshold = 0.5f) {
+        float ratio = (float)black_count / total_count;
+        bool isBlack = ratio > threshold;
+        float confidence = std::abs(ratio - 0.5f);
+        return {isBlack, confidence};
+    }
+
+    // 使用指定阈值读取信息区数据
+    bool readInfoDataWithThreshold(const cv::Mat& frame, int areaId, int len, unsigned char* output, float threshold) {
+        if (areaId < 0 || areaId >= 10 || len <= 0) {
+            return false;
+        }
+
+        int start_x = INFO_AREA_SIZE[areaId][0];
+        int start_y = INFO_AREA_SIZE[areaId][1];
+        int rows = INFO_AREA_SIZE[areaId][2];
+        int cols = INFO_AREA_SIZE[areaId][3];
+
+        // 检查边界
+        if (frame.rows < start_x + rows || frame.cols < start_y + cols) {
+            return false;
+        }
+
+        int total_bits = len * 8;
+        int bit_index = 0;
+
+        // 每个像素块的大小（10x10）
+        const int block_size = 10;
+
+        for (int row = 0; row < rows; row += block_size) {
+            for (int col = 0; col < cols; col += block_size) {
+                if (bit_index >= total_bits) {
+                    break;
+                }
+
+                // 投票机制：统计10x10区域内的黑色像素数
+                int black_count = 0;
+                int total_count = 0;
+
+                for (int r = 0; r < block_size && row + r < rows; r++) {
+                    for (int c = 0; c < block_size && col + c < cols; c++) {
+                        if (isBlack(frame, start_x + row + r, start_y + col + c)) {
+                            black_count++;
+                        }
+                        total_count++;
+                    }
+                }
+
+                // 使用指定的阈值进行投票
+                bool bit = voteBit(black_count, total_count, threshold).first;
+                int original_bit = randomizeBit(bit, areaId, row / block_size, col / block_size);
+
+                int byte_index = bit_index / 8;
+                int bit_offset = 7 - (bit_index % 8);
+
+                if (bit_offset == 7) {
+                    output[byte_index] = 0;
+                }
+                output[byte_index] |= (original_bit << bit_offset);
+
+                bit_index++;
+            }
+        }
+
+        return true;
+    }
+
     // 读取帧标志位（使用投票机制）
     bool readFrameFlag(const cv::Mat& frame, bool& isStart, bool& isEnd) {
         const int fixed_col = 870;
@@ -111,6 +186,7 @@ namespace decode {
         // 每个像素块的大小（10x10）
         const int block_size = 10;
         bool flag[4];
+        float confidence[4];
 
         for (int i = 0; i < 4; i++) {
             int black_count = 0;
@@ -130,14 +206,22 @@ namespace decode {
                 }
             }
 
-            // 投票决定该位的值
-            flag[i] = (black_count > total_count / 2);
+            // 投票决定该位的值，并记录置信度
+            auto result = voteBit(black_count, total_count);
+            flag[i] = result.first;
+            confidence[i] = result.second;
         }
 
         bool b0 = flag[0];
         bool b1 = flag[1];
         bool b2 = flag[2];
         bool b3 = flag[3];
+
+        // 检查置信度：如果所有位的置信度都很低，可能是有问题的帧
+        float minConfidence = *std::min_element(confidence, confidence + 4);
+        if (minConfidence < 0.1f) {
+            DECODE_DBG("[DEBUG] Frame flag low confidence: " << minConfidence);
+        }
 
         DECODE_DBG("[DEBUG] Frame flag bits: " << b0 << " " << b1 << " " << b2 << " " << b3);
 
@@ -205,8 +289,8 @@ namespace decode {
                 }
             }
 
-            // 投票决定该位的值
-            bool bit = (black_count > total_count / 2);
+            // 使用改进的投票机制
+            bool bit = voteBit(black_count, total_count).first;
             number |= (bit ? 1 : 0) << i;
         }
 
@@ -244,8 +328,8 @@ namespace decode {
                 }
             }
 
-            // 投票决定该位的值
-            bool bit = (black_count > total_count / 2);
+            // 使用改进的投票机制
+            bool bit = voteBit(black_count, total_count).first;
             code |= (bit ? 1 : 0) << i;
         }
 
@@ -283,8 +367,8 @@ namespace decode {
                 }
             }
 
-            // 投票决定该位的值
-            bool bit = (black_count > total_count / 2);
+            // 使用改进的投票机制
+            bool bit = voteBit(black_count, total_count).first;
             length |= (bit ? 1 : 0) << i;
         }
 
@@ -332,8 +416,8 @@ namespace decode {
                     }
                 }
 
-                // 投票决定该位的值
-                bool bit = (black_count > total_count / 2);
+                // 使用改进的投票机制
+                bool bit = voteBit(black_count, total_count).first;
                 int original_bit = randomizeBit(bit, areaId, row / block_size, col / block_size);
 
                 int byte_index = bit_index / 8;
@@ -404,7 +488,41 @@ namespace decode {
         return calcCode == info.CheckCode;
     }
 
-    // 解码单张二维码图片
+    // 使用指定阈值解码单帧
+    bool decodeFrameWithThreshold(const cv::Mat& frame, ImageInfo& info, float threshold) {
+        // 读取帧标志位
+        if (!readFrameFlag(frame, info.IsStart, info.IsEnd)) {
+            return false;
+        }
+
+        // 读取帧编号
+        info.FrameBase = readFrameNumber(frame);
+
+        // 读取校验码
+        info.CheckCode = readCheckCode(frame);
+
+        // 读取数据长度
+        int dataLength = readDataLength(frame);
+        info.dataLength = dataLength;
+
+        // 读取10个信息区的数据（使用指定阈值）
+        info.Info.resize(dataLength, 0);
+        int offset = 0;
+        int remainingLength = dataLength;
+
+        for (int i = 0; i < 10; i++) {
+            int len = std::min(LEN_MIN[i], remainingLength);
+            if (len <= 0) break;
+
+            readInfoDataWithThreshold(frame, i, len, info.Info.data() + offset, threshold);
+            remainingLength -= len;
+            offset += len;
+        }
+
+        return true;
+    }
+
+    // 解码单张二维码图片（带多阈值重试机制）
     bool decodeFrame(const cv::Mat& frame, ImageInfo& info) {
         // 确保帧尺寸正确
         if (frame.cols != FrameSize || frame.rows != FrameSize) {
@@ -412,39 +530,22 @@ namespace decode {
             return false;
         }
 
-        // 读取帧标志位
-        if (!readFrameFlag(frame, info.IsStart, info.IsEnd)) {
-            std::cerr << "Error: Invalid frame flag" << std::endl;
-            return false;
+        // 尝试不同的阈值
+        float thresholds[] = {0.5f, 0.45f, 0.55f, 0.4f, 0.6f};
+        
+        for (float threshold : thresholds) {
+            ImageInfo tempInfo;
+            if (decodeFrameWithThreshold(frame, tempInfo, threshold)) {
+                // 验证CRC
+                if (verifyCheckCode(tempInfo)) {
+                    info = tempInfo;
+                    DECODE_DBG("[DEBUG] Decoded with threshold=" << threshold);
+                    return true;
+                }
+            }
         }
 
-        // 读取帧编号
-        info.FrameBase = readFrameNumber(frame);
-        DECODE_DBG("[DEBUG] FrameBase = " << info.FrameBase);
-
-        // 读取校验码
-        info.CheckCode = readCheckCode(frame);
-        DECODE_DBG("[DEBUG] CheckCode = " << info.CheckCode);
-
-        // 读取数据长度
-        int dataLength = readDataLength(frame);
-        DECODE_DBG("[DEBUG] dataLength = " << dataLength);
-        info.dataLength = dataLength;
-
-        // 读取10个信息区的数据
-        info.Info.resize(dataLength, 0);
-        int offset = 0;
-
-        for (int i = 0; i < 10; i++) {
-            int len = std::min(LEN_MIN[i], dataLength);
-            if (len <= 0) break;
-
-            readInfoData(frame, i, len, info.Info.data() + offset);
-            DECODE_DBG("[DEBUG] Area " << i << ": len=" << len << ", offset=" << offset);
-            dataLength -= len;
-            offset += len;
-        }
-
-        return true;
+        // 所有阈值都失败，使用默认阈值0.5返回结果（让上层决定是否接受）
+        return decodeFrameWithThreshold(frame, info, 0.5f);
     }
 }
