@@ -1,5 +1,8 @@
 #include "pic.h"
 
+// 保存预处理图像的宏
+#define SAVE_PREPROCESS_IMAGES 1
+
 /**
  * @brief 图像预处理与二维码定位命名空间
  * @details 该命名空间包含图像预处理、二维码定位点检测、透视变换等功能
@@ -512,26 +515,33 @@ namespace ImgPraseV2 {
 	// ==================== 预处理函数 ====================
 
 	/**
-	 * @brief 使用OTSU算法的图像预处理
-	 * @param srcImg 源彩色图像
-	 * @param blurRate 模糊率(默认0.0005)
-	 * @return 二值化图像
-	 * @details 处理流程：灰度化 -> 高斯模糊 -> OTSU二值化
-	 */
-	Mat preprocessImgV2_OTSU(const Mat& srcImg, float blurRate) {
-		Mat tempImg;
-		// 1. 灰度化
-		cvtColor(srcImg, tempImg, COLOR_BGR2GRAY);
+     * @brief 使用OTSU算法的图像预处理
+     * @param srcImg 源彩色图像
+     * @param blurRate 模糊率(默认0.0005)
+     * @return 二值化图像
+     * @details 处理流程：灰度化 -> 非局部均值去噪 -> 中值滤波 -> OTSU二值化
+     */
+    Mat preprocessImgV2_OTSU(const Mat& srcImg, float blurRate) {
+        Mat tempImg;
+        // 1. 灰度化
+        cvtColor(srcImg, tempImg, COLOR_BGR2GRAY);
 
-		// 2. 高斯模糊，减少高频干扰(如摩尔纹)
-		float BlurSize = 1.0f + srcImg.rows * blurRate;
-		if (BlurSize < 1.0f) BlurSize = 1.0f;
-		blur(tempImg, tempImg, Size2f(BlurSize, BlurSize));
+        // 2. 非局部均值去噪，保留边缘
+        Mat denoisedImg;
+        fastNlMeansDenoising(tempImg, denoisedImg, 30, 7, 21);
 
-		// 3. OTSU自动阈值二值化
-		threshold(tempImg, tempImg, 0, 255, THRESH_BINARY | THRESH_OTSU);
-		return tempImg;
-	}
+        // 3. 中值滤波，去除摩尔纹和椒盐噪声
+        medianBlur(denoisedImg, tempImg, 3);
+
+        // 4. 高斯模糊，进一步减少高频干扰
+        float BlurSize = 1.0f + srcImg.rows * blurRate;
+        if (BlurSize < 1.0f) BlurSize = 1.0f;
+        blur(tempImg, tempImg, Size2f(BlurSize, BlurSize));
+
+        // 5. OTSU自动阈值二值化
+        threshold(tempImg, tempImg, 0, 255, THRESH_BINARY | THRESH_OTSU);
+        return tempImg;
+    }
 
 	/**
 	 * @brief 使用自适应阈值的图像预处理
@@ -986,22 +996,19 @@ namespace ImgPraseV2 {
 			return Mat();
 		}
 
-		// 根据相邻点计算宽高
-		float width = helpFunction::distance(srcPoints[0], srcPoints[1]);
-		float height = helpFunction::distance(srcPoints[1], srcPoints[2]);
+		// 固定输出尺寸为1080x1080，包含20像素缓冲区
+		const int targetSize = 1080;
+		const int bufferSize = 20;
+		const int qrSize = targetSize - 2 * bufferSize; // 二维码实际大小
 
-		// 确保最小尺寸
-		int outputWidth = std::max(1, (int)width);
-		int outputHeight = std::max(1, (int)height);
+		Size size(targetSize, targetSize);
 
-		Size size(outputWidth, outputHeight);
-
-		// 目标点(标准矩形)
+		// 目标点(标准矩形)，包含缓冲区，确保左角点左上角为(20,20)
 		vector<Point2f> dstPoints = {
-			Point2f(0, 0),
-			Point2f(size.width - 1, 0),
-			Point2f(size.width - 1, size.height - 1),
-			Point2f(0, size.height - 1)
+			Point2f(bufferSize, bufferSize),           // 左上
+			Point2f(bufferSize + qrSize - 1, bufferSize),  // 右上
+			Point2f(bufferSize + qrSize - 1, bufferSize + qrSize - 1), // 右下
+			Point2f(bufferSize, bufferSize + qrSize - 1)    // 左下
 		};
 
 		// 计算透视变换矩阵并变换
@@ -1026,29 +1033,44 @@ namespace ImgPraseV2 {
 		float blurRates[] = { 0.0005f, 0.0000f, 0.00025f, 0.001f, 0.0001f };
 
 		for (int i = 0; i < 5; i++) {
-			// 预处理：灰度化 -> 模糊 -> 二值化
-			Mat binaryImg = preprocessImgV2_OTSU(srcImg, blurRates[i]);
+				// 预处理：使用组合方法处理图像
+				Mat binaryImg;
+				if (i == 0) {
+					// 组合预处理方法
+					binaryImg = preprocessImgV2_Combined(srcImg);
+				} else {
+					// 尝试不同的模糊率
+					binaryImg = preprocessImgV2_OTSU(srcImg, blurRates[i]);
+				}
 
-			// 保存调试图像
-			if (!debugPath.empty() && i == 0) {
-				imwrite(debugPath + "_0_binary.png", binaryImg);
-			}
+				// 保存调试图像
+				if (!debugPath.empty() && i == 0) {
+					imwrite(debugPath + "_0_binary.png", binaryImg);
+				}
 
-			qrPoints.clear();
-			// 查找定位点
-			if (findPositionPoints(binaryImg, qrPoints)) {
+				// 应用形态学操作去除噪声
+				binaryImg = preprocessImgV2_Morphology(binaryImg);
+
+				qrPoints.clear();
+				// 查找定位点
+				if (findPositionPoints(binaryImg, qrPoints)) {
 				if (qrPoints.size() >= 3) {
 					// 保存定位点调试图像
-					if (!debugPath.empty()) {
-						Mat debugPoints = srcImg.clone();
-						for (size_t k = 0; k < qrPoints.size(); k++) {
-							vector<Point> cont = qrPoints[k];
-							for (int c = 0; c < cont.size(); c++) {
-								circle(debugPoints, cont[c], 3, Scalar(0, 255, 0), -1);
-							}
-						}
-						imwrite(debugPath + "_1_qrpoints.png", debugPoints);
+			if (!debugPath.empty()) {
+				Mat debugPoints = srcImg.clone();
+				for (size_t k = 0; k < qrPoints.size(); k++) {
+					vector<Point> cont = qrPoints[k];
+					for (int c = 0; c < cont.size(); c++) {
+						circle(debugPoints, cont[c], 3, Scalar(0, 255, 0), -1);
 					}
+				}
+				imwrite(debugPath + "_1_qrpoints.png", debugPoints);
+			}
+
+			// 保存预处理后的二值图像
+			if (!debugPath.empty() && SAVE_PREPROCESS_IMAGES && !binaryImg.empty()) {
+				imwrite(debugPath + "_binary.png", binaryImg);
+			}
 
 					// 过滤多余的点
 					int dumpResult = DumpExcessQrPoint(qrPoints);
@@ -1089,14 +1111,19 @@ namespace ImgPraseV2 {
 
 					if (!cropped1.empty()) {
 						// 保存裁剪调试图像
-						if (!debugPath.empty()) {
-							Mat debugCrop = cropped1.clone();
-							for (int k = 0; k < 4; k++) {
-								circle(debugCrop, adjusted1[k], 5, Scalar(0, 0, 255), -1);
-								putText(debugCrop, to_string(k), adjusted1[k], FONT_HERSHEY_SIMPLEX, 0.5, Scalar(255, 0, 0), 2);
-							}
-							imwrite(debugPath + "_2_cropped1.png", debugCrop);
+					if (!debugPath.empty()) {
+						Mat debugCrop = cropped1.clone();
+						for (int k = 0; k < 4; k++) {
+							circle(debugCrop, adjusted1[k], 5, Scalar(0, 0, 255), -1);
+							putText(debugCrop, to_string(k), adjusted1[k], FONT_HERSHEY_SIMPLEX, 0.5, Scalar(255, 0, 0), 2);
 						}
+						imwrite(debugPath + "_2_cropped1.png", debugCrop);
+					}
+
+					// 保存最终调整大小后的图像
+					if (!debugPath.empty() && SAVE_PREPROCESS_IMAGES && !dstImg.empty()) {
+						imwrite(debugPath + "_final_1080x1080.png", dstImg);
+					}
 
 						Mat finalCrop = cropped1;
 
@@ -1109,12 +1136,21 @@ namespace ImgPraseV2 {
 							grayCrop = finalCrop.clone();
 						}
 
-						// 二值化
+						// 二值化 - 使用OTSU算法自动阈值
 						Mat binaryCrop;
-						threshold(grayCrop, binaryCrop, 127, 255, THRESH_BINARY);
+						threshold(grayCrop, binaryCrop, 0, 255, THRESH_BINARY | THRESH_OTSU);
+						
+						// 应用形态学操作去除噪声
+						Mat kernel = getStructuringElement(MORPH_RECT, Size(3, 3));
+						morphologyEx(binaryCrop, binaryCrop, MORPH_CLOSE, kernel);
+						morphologyEx(binaryCrop, binaryCrop, MORPH_OPEN, kernel);
 
-						// 调整大小到1080x1080
-						resize(binaryCrop, dstImg, Size(1080, 1080), 0, 0, INTER_NEAREST);
+						// 确保最终输出为1080x1080
+						if (binaryCrop.size() != Size(1080, 1080)) {
+							resize(binaryCrop, dstImg, Size(1080, 1080), 0, 0, INTER_NEAREST);
+						} else {
+							dstImg = binaryCrop.clone();
+						}
 						return true;
 					}
 				}

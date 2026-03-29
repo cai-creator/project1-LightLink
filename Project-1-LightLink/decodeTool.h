@@ -11,7 +11,7 @@ namespace decode {
     // 每帧包含的字节数
     constexpr int BytesPerFrame = 1242;
     // 二维码帧尺寸
-    constexpr int FrameSize = 108;
+    constexpr int FrameSize = 1080;
 
     // 图像帧信息结构体
     struct ImageInfo

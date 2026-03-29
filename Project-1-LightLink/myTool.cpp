@@ -72,8 +72,8 @@ void decodeEXE(std::string video_path, std::string output_path) {
 	std::cout << "\nStep 1: Video to frames..." << std::endl;
 	VideotoPic(video_path.c_str(), (mid + "\\frame").c_str(), "jpg");
 
-	// 步骤2: 跳过图像预处理，直接使用原始帧
-	std::cout << "\nStep 2: Skip preprocessing, using original frames..." << std::endl;
+	// 步骤2: 图像预处理
+	std::cout << "\nStep 2: Preprocessing frames..." << std::endl;
 
 	// 步骤3: 遍历处理后的图片，解码每帧
 	std::cout << "\nStep 3: Decoding frames..." << std::endl;
@@ -81,6 +81,7 @@ void decodeEXE(std::string video_path, std::string output_path) {
 	std::map<uint16_t, ImageInfo> frameMap;
 	int decode_fail_count = 0;
 	int decode_success_count = 0;
+	int valid_qr_count = 0;
 
 	// 遍历mid_operation目录下的所有帧图片
 	for (int i = 1; ; i++) {
@@ -93,41 +94,63 @@ void decodeEXE(std::string video_path, std::string output_path) {
 			break;
 		}
 
-		// 确保尺寸正确
-		if (frame.cols != FrameSize || frame.rows != FrameSize) {
-			resize(frame, frame, Size(FrameSize, FrameSize));
-		}
+		// 图像预处理
+		Mat processedFrame;
+		std::string debugPath = mid + "\\debug_frame" + std::to_string(i);
+		bool processed = Main(frame, processedFrame, debugPath);
+		
+		// 先尝试使用处理后的帧
+		if (processed) {
+			valid_qr_count++;
+			std::cout << "Frame " << i << ": Using processed frame for decoding" << std::endl;
 
-		// 解码单帧
-		ImageInfo info;
-		if (decodeFrame(frame, info)) {
-			decode_success_count++;
-			frameMap[info.FrameBase] = info;
+			// 直接使用1080x1080图像进行解码
+			Mat resizedFrame = processedFrame;
 
-			std::cout << "Frame " << i << ": No." << info.FrameBase
-				<< " Start=" << info.IsStart << " End=" << info.IsEnd
-				<< " CheckCode=" << info.CheckCode;
+			// 保存1080x1080图像
+			if (!resizedFrame.empty()) {
+					std::string resizedPath = mid + "\\resized_frame" + std::to_string(i) + ".png";
+					imwrite(resizedPath, resizedFrame);
+				}
 
-			// 校验（暂时禁用）
-			// if (verifyCheckCode(info)) {
-			std::cout << " [OK]" << std::endl;
-			// }
-			// else {
-			// 	std::cout << " [CHECK FAILED]" << std::endl;
-			// }
-		}
-		else {
+			// 解码单帧
+			ImageInfo info;
+			if (decodeFrame(resizedFrame, info)) {
+				decode_success_count++;
+				frameMap[info.FrameBase] = info;
+
+				std::cout << "Frame " << i << ": No." << info.FrameBase
+					<< " Start=" << info.IsStart << " End=" << info.IsEnd
+					<< " CheckCode=" << info.CheckCode;
+
+				// 校验（暂时禁用）
+				// if (verifyCheckCode(info)) {
+				std::cout << " [OK]" << std::endl;
+				// }
+				// else {
+				// 	std::cout << " [CHECK FAILED]" << std::endl;
+				// }
+			} else {
+				// 处理后的帧解码失败，直接标记为失败
+				decode_fail_count++;
+				std::cerr << "Frame " << i << ": Decode failed (Invalid frame flag)" << std::endl;
+			}
+		} else {
+			// 预处理失败，跳过此帧
 			decode_fail_count++;
-			std::cerr << "Frame " << i << ": Decode failed (Invalid frame flag)" << std::endl;
+			std::cerr << "Frame " << i << ": Preprocessing failed, skipping frame" << std::endl;
 		}
 	}
 	std::cout << "Step 3: Decode success: " << decode_success_count << ", Failed: " << decode_fail_count << std::endl;
+	std::cout << "Total frames processed: " << (decode_success_count + decode_fail_count) << std::endl;
+	std::cout << "Valid QR frames found: " << valid_qr_count << std::endl;
 
 	// 步骤4: 合并所有帧数据
 	std::cout << "\nStep 4: Merging frames..." << std::endl;
 
 	std::vector<unsigned char> outputData;
 
+	// 按帧编号顺序合并数据
 	for (auto& pair : frameMap) {
 		ImageInfo& info = pair.second;
 		outputData.insert(outputData.end(), info.Info.begin(), info.Info.end());
@@ -153,12 +176,42 @@ void decodeEXE(std::string video_path, std::string output_path) {
 	// 只取原始图片大小的数据（忽略填充）
 	int saveSize = std::min((int)outputData.size(), EXPECTED_SIZE);
 
+	// 检查数据完整性
+	if (outputData.size() < EXPECTED_SIZE) {
+		std::cout << "Warning: Insufficient data. Expected " << EXPECTED_SIZE << " bytes, got " << outputData.size() << " bytes." << std::endl;
+		// 填充剩余数据为黑色
+		outputData.resize(EXPECTED_SIZE, 0);
+		saveSize = EXPECTED_SIZE;
+	}
+
+	// 验证数据是否有效
+	bool dataValid = true;
+	int zeroCount = 0;
+	for (size_t i = 0; i < std::min((size_t)1000, outputData.size()); i++) {
+		if (outputData[i] == 0) zeroCount++;
+	}
+	if (zeroCount > 900) {
+		std::cout << "Warning: Too many zero bytes in data, possible decoding error." << std::endl;
+		dataValid = false;
+	}
+
+	// 显示数据统计信息
+	int minVal = 255, maxVal = 0;
+	for (size_t i = 0; i < std::min((size_t)1000, outputData.size()); i++) {
+		if (outputData[i] < minVal) minVal = outputData[i];
+		if (outputData[i] > maxVal) maxVal = outputData[i];
+	}
+	std::cout << "Data range: " << minVal << " - " << maxVal << std::endl;
+
 	Mat decodedImg(DECODED_HEIGHT, DECODED_WIDTH, CV_8UC3);
 	memcpy(decodedImg.data, outputData.data(), saveSize);
 
 	// 直接保存，不需要通道转换
 	if (imwrite(output_path, decodedImg)) {
 		std::cout << "Image saved to: " << output_path << std::endl;
+		if (!dataValid) {
+			std::cout << "Note: Image saved but data may be corrupted." << std::endl;
+		}
 	}
 	else {
 		std::cerr << "Failed to save image" << std::endl;
@@ -166,34 +219,24 @@ void decodeEXE(std::string video_path, std::string output_path) {
 }
 
 
-int main(int argc, char* argv[])
-{
-//	if (argc != 3) {
-//		std::cout << "Format error" << std::endl;
-//	}
-//
-//	std::string source_path(argv[1]);
-//	std::string target_path(argv[2]);
-//	
-//#ifdef _ENCODE
-//	encodeEXE(source_path,target_path);
-//
-//#elif defined(_DECODE)
-//	decodeEXE();
-//#else
-//	std::cerr << "Error: Please define either _ENCODE or _DECODE before compiling." << std::endl;
-//   
-//#endif
+int main(int argc, char* argv[]) {
+	std::string source_path, target_path;
 
-	uint16_t x = GetCheckCode(3, "ABC", 1, frameStyle::First);
-	uint16_t a[16];
-	for (int i = 0;i < 16;i++) {
-		a[i] = x & 1;
-		x >>= 1;
+	// 从命令行参数获取路径
+	if (argc >= 3) {
+		source_path = argv[1];
+		target_path = argv[2];
+		std::cout << "Using command line arguments: " << std::endl;
+		std::cout << "Source path: " << source_path << std::endl;
+		std::cout << "Target path: " << target_path << std::endl;
+	} else {
+		// 手动输入路径
+		std::cout << "Please enter paths manually:" << std::endl;
+		std::cout << "Enter source path: ";
+		std::getline(std::cin, source_path);
+		std::cout << "Enter target path: ";
+		std::getline(std::cin, target_path);
 	}
-
-	std::string source_path(argv[1]);
-	std::string target_path(argv[2]);
 
 #ifdef _ENCODE
 	encodeEXE(source_path, target_path);
