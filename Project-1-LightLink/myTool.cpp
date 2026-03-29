@@ -51,7 +51,7 @@ void encodeEXE(std::string source_path, std::string target_path) {
 	//	waitKey(0);
 	//}
 
-	SaveMutiFrame((char*)source.data, mid.c_str(), source.total() * source.elemSize());
+	SaveMutiFrame((char*)source.data, mid.c_str(), source.total() * source.elemSize(),source.cols);
 	picTovideo_impl((mid + "\\frame%d.jpg").c_str(), target_path, 30, 1080);
 
 

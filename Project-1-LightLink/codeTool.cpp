@@ -338,12 +338,12 @@ namespace code
         return frame;
     }
 
- void SaveMutiFrame(char* data, const char* savepath, int len) {
+ void SaveMutiFrame(char* data, const char* savepath, int len, int width) {
      Mat frame;
      srand(time(0));
      
      if (len < BytesPerFrame) {
-         frame = CreateFrame(len, data, frameStyle::FirstAndFinall, 1);
+         frame = CreateFrame(len, data, frameStyle::FirstAndFinall, width);
          if (frame.empty()) {
              std::cout << "Error: image generation failed" << std::endl;
          }
@@ -353,7 +353,7 @@ namespace code
      }
 
      else {
-         int frame_id = 1;
+         int frame_id = width;
          while (len > 0) {
              int current_len = min(len, BytesPerFrame);
              len -= current_len;

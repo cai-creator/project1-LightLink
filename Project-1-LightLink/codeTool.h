@@ -24,6 +24,6 @@ namespace code
     void InputCheckCode(cv::Mat& frame, int checkcode);// 写入校验码  -- 7
     cv::Mat EnlargePic(cv::Mat& frame, int size); // 放大图片
     cv::Mat CreateFrame(int data_len, const char* data, frameStyle style, int frame_id);// 8编码一帧数据 等待设计
-    void SaveMutiFrame(char* data, const char* savepath, int len);// 9保存多帧数据 等待设计
+    void SaveMutiFrame(char* data, const char* savepath, int len, int width);// 9保存多帧数据 等待设计
     cv::Mat ScaleToTen(cv::Mat& frame, int B);
 }
