@@ -51,8 +51,26 @@ void encodeEXE(std::string source_path, std::string target_path) {
 	//	waitKey(0);
 	//}
 
-	SaveMutiFrame((char*)source.data, mid.c_str(), source.total() * source.elemSize(),source.cols);
-	picTovideo_impl((mid + "\\frame%d.jpg").c_str(), target_path, 30, 1080);
+	// 准备包含图像尺寸信息的数据
+	int width = source.cols;
+	int height = source.rows;
+	int dataSize = source.total() * source.elemSize();
+	
+	// 分配内存存储尺寸信息和图像数据
+	char* dataWithSize = new char[8 + dataSize];
+	// 保存宽度和高度信息（前4字节是宽度，接下来4字节是高度）
+	*((int*)dataWithSize) = width;
+	*((int*)(dataWithSize + 4)) = height;
+	// 复制图像数据
+	memcpy(dataWithSize + 8, source.data, dataSize);
+	
+	// 编码包含尺寸信息的数据
+	SaveMutiFrame(dataWithSize, mid.c_str(), 8 + dataSize, width);
+	
+	// 释放内存
+	delete[] dataWithSize;
+	int fps = 20; // 设置视频帧率为20
+	picTovideo_impl((mid + "/frame%1d.jpg").c_str(), target_path, fps, 1080);
 
 
 }
@@ -166,29 +184,63 @@ void decodeEXE(std::string video_path, std::string output_path) {
 	std::cout << "Total decoded data size: " << outputData.size() << " bytes" << std::endl;
 
 	// 步骤5: 保存解码后的数据为PNG图片
-	const int DECODED_WIDTH = 1024;
-	const int DECODED_HEIGHT = 574;
+	// 从起始帧中获取原始图像的尺寸
+	// 查找起始帧
+	int DECODED_WIDTH = 1024; // 默认宽度
+	int DECODED_HEIGHT = 574; // 默认高度
+	bool foundStartFrame = false;
+	
+	for (auto& pair : frameMap) {
+		ImageInfo& info = pair.second;
+		if (info.IsStart) {
+			// 从起始帧的Info数据中提取原始图像尺寸
+			// 假设前4字节是宽度，接下来4字节是高度
+			if (info.Info.size() >= 8) {
+				DECODED_WIDTH = *((int*)info.Info.data());
+				DECODED_HEIGHT = *((int*)(info.Info.data() + 4));
+				foundStartFrame = true;
+				std::cout << "Found start frame with image size: " << DECODED_WIDTH << "x" << DECODED_HEIGHT << std::endl;
+				break;
+			}
+		}
+	}
+	
+	if (!foundStartFrame) {
+		std::cout << "Warning: Start frame not found, using default image size: " << DECODED_WIDTH << "x" << DECODED_HEIGHT << std::endl;
+	}
+	
 	const int CHANNELS = 3;
 	const int EXPECTED_SIZE = DECODED_WIDTH * DECODED_HEIGHT * CHANNELS;
 
 	output_path = fix_path(getRootdir_impl() + "\\" + output_path);
 
+	// 跳过前8字节的尺寸信息，使用实际的图像数据
+	const size_t sizeInfoOffset = 8;
+	std::vector<unsigned char> actualImageData;
+	
+	if (outputData.size() > sizeInfoOffset) {
+		actualImageData.assign(outputData.begin() + sizeInfoOffset, outputData.end());
+	} else {
+		actualImageData = outputData;
+		std::cout << "Warning: No size information found in data" << std::endl;
+	}
+
 	// 只取原始图片大小的数据（忽略填充）
-	int saveSize = std::min((int)outputData.size(), EXPECTED_SIZE);
+	int saveSize = std::min((int)actualImageData.size(), EXPECTED_SIZE);
 
 	// 检查数据完整性
-	if (outputData.size() < EXPECTED_SIZE) {
-		std::cout << "Warning: Insufficient data. Expected " << EXPECTED_SIZE << " bytes, got " << outputData.size() << " bytes." << std::endl;
+	if (actualImageData.size() < EXPECTED_SIZE) {
+		std::cout << "Warning: Insufficient data. Expected " << EXPECTED_SIZE << " bytes, got " << actualImageData.size() << " bytes." << std::endl;
 		// 填充剩余数据为黑色
-		outputData.resize(EXPECTED_SIZE, 0);
+		actualImageData.resize(EXPECTED_SIZE, 0);
 		saveSize = EXPECTED_SIZE;
 	}
 
 	// 验证数据是否有效
 	bool dataValid = true;
 	int zeroCount = 0;
-	for (size_t i = 0; i < std::min((size_t)1000, outputData.size()); i++) {
-		if (outputData[i] == 0) zeroCount++;
+	for (size_t i = 0; i < std::min((size_t)1000, actualImageData.size()); i++) {
+		if (actualImageData[i] == 0) zeroCount++;
 	}
 	if (zeroCount > 900) {
 		std::cout << "Warning: Too many zero bytes in data, possible decoding error." << std::endl;
@@ -197,14 +249,15 @@ void decodeEXE(std::string video_path, std::string output_path) {
 
 	// 显示数据统计信息
 	int minVal = 255, maxVal = 0;
-	for (size_t i = 0; i < std::min((size_t)1000, outputData.size()); i++) {
-		if (outputData[i] < minVal) minVal = outputData[i];
-		if (outputData[i] > maxVal) maxVal = outputData[i];
+	for (size_t i = 0; i < std::min((size_t)1000, actualImageData.size()); i++) {
+		if (actualImageData[i] < minVal) minVal = actualImageData[i];
+		if (actualImageData[i] > maxVal) maxVal = actualImageData[i];
 	}
 	std::cout << "Data range: " << minVal << " - " << maxVal << std::endl;
 
+	// 创建与编码时相同尺寸的图像
 	Mat decodedImg(DECODED_HEIGHT, DECODED_WIDTH, CV_8UC3);
-	memcpy(decodedImg.data, outputData.data(), saveSize);
+	memcpy(decodedImg.data, actualImageData.data(), saveSize);
 
 	// 直接保存，不需要通道转换
 	if (imwrite(output_path, decodedImg)) {

@@ -31,19 +31,19 @@ namespace decode {
     int randomizeBit(int bit, int areaId, int row, int col);
 
     // 读取帧标志位
-    bool readFrameFlag(const cv::Mat& frame, bool& isStart, bool& isEnd);
+    bool readFrameFlag(const cv::Mat& frame, bool& isStart, bool& isEnd, float frame_avg_gray);
 
     // 读取帧编号
-    uint16_t readFrameNumber(const cv::Mat& frame);
+    uint16_t readFrameNumber(const cv::Mat& frame, float frame_avg_gray);
 
     // 读取校验码
-    uint16_t readCheckCode(const cv::Mat& frame);
+    uint16_t readCheckCode(const cv::Mat& frame, float frame_avg_gray);
 
     // 读取数据长度
-    int readDataLength(const cv::Mat& frame);
+    int readDataLength(const cv::Mat& frame, float frame_avg_gray);
 
     // 读取信息区数据
-    bool readInfoData(const cv::Mat& frame, int areaId, int len, unsigned char* output);
+    bool readInfoData(const cv::Mat& frame, int areaId, int len, unsigned char* output, float frame_avg_gray);
 
     // 计算校验码
     uint16_t calculateCheckCode(int data_len, const unsigned char* data, int frame_id, bool isStart, bool isEnd);
