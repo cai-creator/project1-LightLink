@@ -1125,8 +1125,21 @@ namespace ImgPraseV2 {
 					}
 				}
 
-				// 投票决定统一为黑色还是白色 - 降低黑色判定阈值（30%即可判为黑色）
-				uchar blockColor = (blackCount >= totalPixels * 0.3) ? 0 : 255;
+				float blackRatio = (float)blackCount / totalPixels;
+				uchar blockColor;
+
+				// 平衡的判定逻辑：既避免白色块误判，又保证黑色块正确识别
+				if (blackRatio >= 0.35f) {
+					// 黑色比例足够高，判为黑色
+					blockColor = 0;
+				} else if (blackRatio <= 0.25f) {
+					// 白色比例足够高，判为白色
+					blockColor = 255;
+				} else {
+					// 中间区域：稍微偏向白色，但不完全判白
+					// 用30%作为中间分界点
+					blockColor = (blackRatio >= 0.3f) ? 0 : 255;
+				}
 
 				// 应用到结果图像
 				for (int by = 0; by < blockSize; by++) {
@@ -1300,16 +1313,11 @@ namespace ImgPraseV2 {
 							grayCrop = finalCrop.clone();
 						}
 
-						// 二值化 - 使用OTSU算法自动阈值
+						// 二值化 - 使用OTSU算法自动阈值（不做额外形态学操作，避免改变定位点）
 						Mat binaryCrop;
 						threshold(grayCrop, binaryCrop, 0, 255, THRESH_BINARY | THRESH_OTSU);
-						
-						// 应用形态学操作去除噪声
-						Mat kernel = getStructuringElement(MORPH_RECT, Size(3, 3));
-						morphologyEx(binaryCrop, binaryCrop, MORPH_CLOSE, kernel);
-						morphologyEx(binaryCrop, binaryCrop, MORPH_OPEN, kernel);
 
-						// 确保最终输出为1080x1080
+						// 确保最终输出为1080x1080（使用INTER_NEAREST保持像素边缘锐利）
 						Mat resizedCrop;
 						if (binaryCrop.size() != Size(1080, 1080)) {
 							resize(binaryCrop, resizedCrop, Size(1080, 1080), 0, 0, INTER_NEAREST);
