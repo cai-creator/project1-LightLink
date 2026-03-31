@@ -91,6 +91,93 @@ namespace ImgPraseV2 {
 		}
 
 		/**
+		 * @brief 在定位点附近查找指定方向的黑色像素角点
+		 * @param binaryImg 二值化图像
+		 * @param contour 轮廓（最外层黑色环的轮廓）
+		 * @param direction 方向：0=左上, 1=右上, 2=右下, 3=左下
+		 * @return 找到的黑色像素角点
+		 */
+		Point2f FindPreciseCornerPixel(const Mat& binaryImg, const vector<Point>& contour, int direction) {
+			// 图像边界检查
+			int imgWidth = binaryImg.cols;
+			int imgHeight = binaryImg.rows;
+
+			Point bestPixel;
+			float bestScore = -1e10f;
+
+			// 首先从轮廓本身的点中找最佳角点
+			for (const auto& pt : contour) {
+				int x = pt.x;
+				int y = pt.y;
+
+				// 检查边界
+				if (x < 0 || x >= imgWidth || y < 0 || y >= imgHeight) continue;
+
+				// 必须是黑色像素
+				if (binaryImg.at<uchar>(y, x) != 0) continue;
+
+				float score = 0;
+				switch (direction) {
+					case 0: // 左上：x和y越小越好
+						score = -x - y;
+						break;
+					case 1: // 右上：x越大，y越小越好
+						score = x - y;
+						break;
+					case 2: // 右下：x和y越大越好
+						score = x + y;
+						break;
+					case 3: // 左下：x越小，y越大越好
+						score = -x + y;
+						break;
+				}
+
+				if (score > bestScore) {
+					bestScore = score;
+					bestPixel = pt;
+				}
+			}
+
+			// 如果在轮廓中找到了，直接返回
+			if (bestScore > -1e9f) {
+				return Point2f((float)bestPixel.x, (float)bestPixel.y);
+			}
+
+			// 备用方案：如果轮廓中没找到，用minAreaRect的角点
+			RotatedRect rect = minAreaRect(contour);
+			Point2f rectCorners[4];
+			rect.points(rectCorners);
+
+			Point2f fallbackCorner = rectCorners[0];
+			for (int i = 1; i < 4; i++) {
+				float scoreCurrent = 0, scoreFallback = 0;
+				switch (direction) {
+					case 0: 
+						scoreCurrent = -rectCorners[i].x - rectCorners[i].y;
+						scoreFallback = -fallbackCorner.x - fallbackCorner.y;
+						break;
+					case 1: 
+						scoreCurrent = rectCorners[i].x - rectCorners[i].y;
+						scoreFallback = fallbackCorner.x - fallbackCorner.y;
+						break;
+					case 2: 
+						scoreCurrent = rectCorners[i].x + rectCorners[i].y;
+						scoreFallback = fallbackCorner.x + fallbackCorner.y;
+						break;
+					case 3: 
+						scoreCurrent = -rectCorners[i].x + rectCorners[i].y;
+						scoreFallback = -fallbackCorner.x + fallbackCorner.y;
+						break;
+				}
+				if (scoreCurrent > scoreFallback) {
+					fallbackCorner = rectCorners[i];
+				}
+			}
+
+			return fallbackCorner;
+		}
+
+		/**
 		 * @brief 计算外轮廓角点
 		 * @param contour 轮廓
 		 * @param allCenters 所有定位点中心
@@ -886,39 +973,37 @@ namespace ImgPraseV2 {
 			return points;
 		}
 
-		vector<Point2f> workPoints = points;
-		Point2f fourthPoint(0, 0);
-		bool hasFourthPoint = false;
-		int auxIdx = -1;
-
-		// 如果有4个点，找出面积最小的作为辅助点
-		if (workPoints.size() == 4 && positionContours.size() == 4) {
-			vector<float> areas;
-			for (int i = 0; i < 4; i++) {
-				areas.push_back(contourArea(positionContours[i]));
+		// 如果有4个点，直接用这4个点进行排序
+		if (points.size() == 4) {
+			vector<Point2f> result(4);
+			
+			// 找出四个角：左上、右上、右下、左下
+			Point2f tl = points[0];
+			Point2f tr = points[0];
+			Point2f br = points[0];
+			Point2f bl = points[0];
+			
+			for (const auto& p : points) {
+				// 左上：x+y最小
+				if (p.x + p.y < tl.x + tl.y) tl = p;
+				// 右上：x-y最大
+				if (p.x - p.y > tr.x - tr.y) tr = p;
+				// 右下：x+y最大
+				if (p.x + p.y > br.x + br.y) br = p;
+				// 左下：-x+y最大
+				if (-p.x + p.y > -bl.x + bl.y) bl = p;
 			}
-
-			float minArea = areas[0];
-			auxIdx = 0;
-			for (int i = 1; i < 4; i++) {
-				if (areas[i] < minArea) {
-					minArea = areas[i];
-					auxIdx = i;
-				}
-			}
-
-			fourthPoint = workPoints[auxIdx];
-			hasFourthPoint = true;
-
-			// 移除辅助点
-			vector<Point2f> temp;
-			for (int i = 0; i < 4; i++) {
-				if (i != auxIdx) {
-					temp.push_back(workPoints[i]);
-				}
-			}
-			workPoints = temp;
+			
+			result[0] = tl;  // 左上
+			result[1] = tr;  // 右上
+			result[2] = br;  // 右下
+			result[3] = bl;  // 左下
+			
+			return result;
 		}
+
+		// 只有3个点的情况
+		vector<Point2f> workPoints = points;
 
 		// 计算边界
 		float minX = 1e10f, maxX = -1e10f;
@@ -948,7 +1033,7 @@ namespace ImgPraseV2 {
 		if (bottomCands.size() >= 1) {
 			sort(bottomCands.begin(), bottomCands.end(), [](const Point2f& a, const Point2f& b) {
 				return a.x < b.x;
-				});
+			});
 			bottomLeft = bottomCands[0];
 		}
 
@@ -956,7 +1041,7 @@ namespace ImgPraseV2 {
 		if (topCands.size() >= 2) {
 			sort(topCands.begin(), topCands.end(), [](const Point2f& a, const Point2f& b) {
 				return a.x < b.x;
-				});
+			});
 			topLeft = topCands[0];
 			topRight = topCands[1];
 		}
@@ -964,7 +1049,7 @@ namespace ImgPraseV2 {
 			topLeft = topCands[0];
 			sort(bottomCands.begin(), bottomCands.end(), [](const Point2f& a, const Point2f& b) {
 				return a.x < b.x;
-				});
+			});
 			topRight = bottomCands[0];
 		}
 
@@ -972,14 +1057,7 @@ namespace ImgPraseV2 {
 		vector<Point2f> result;
 		result.push_back(topLeft);       // 左上
 		result.push_back(topRight);      // 右上
-
-		if (hasFourthPoint) {
-			result.push_back(fourthPoint);  // 右下(辅助点)
-		}
-		else {
-			result.push_back(bottomLeft + topRight - topLeft);  // 计算右下角
-		}
-
+		result.push_back(bottomLeft + topRight - topLeft);  // 计算右下角
 		result.push_back(bottomLeft);    // 左下
 
 		return result;
@@ -1014,9 +1092,63 @@ namespace ImgPraseV2 {
 		// 计算透视变换矩阵并变换
 		Mat M = getPerspectiveTransform(srcPoints, dstPoints);
 		Mat dstImg;
-		warpPerspective(srcImg, dstImg, M, size);
+		warpPerspective(srcImg, dstImg, M, size, INTER_LINEAR, BORDER_CONSTANT, Scalar(255, 255, 255));
 
 		return dstImg;
+	}
+
+	/**
+	 * @brief 10x10像素块统一处理：将图像按10x10像素块统一为黑色或白色
+	 * @param img 输入图像(二值化图像)
+	 * @return 处理后的图像
+	 */
+	Mat OptimizeBy10x10Blocks(const Mat& img) {
+		Mat result = img.clone();
+		int blockSize = 10;
+
+		for (int y = 0; y < img.rows; y += blockSize) {
+			for (int x = 0; x < img.cols; x += blockSize) {
+				// 计算当前块的范围，只处理完整的10x10块
+				if (x + blockSize > img.cols || y + blockSize > img.rows) {
+					continue;
+				}
+
+				// 统计黑色像素数量
+				int blackCount = 0;
+				int totalPixels = blockSize * blockSize;
+
+				for (int by = 0; by < blockSize; by++) {
+					for (int bx = 0; bx < blockSize; bx++) {
+						if (img.at<uchar>(y + by, x + bx) == 0) {
+							blackCount++;
+						}
+					}
+				}
+
+				// 投票决定统一为黑色还是白色 - 降低黑色判定阈值（30%即可判为黑色）
+				uchar blockColor = (blackCount >= totalPixels * 0.3) ? 0 : 255;
+
+				// 应用到结果图像
+				for (int by = 0; by < blockSize; by++) {
+					for (int bx = 0; bx < blockSize; bx++) {
+						result.at<uchar>(y + by, x + bx) = blockColor;
+					}
+				}
+			}
+		}
+
+		// 确保边缘20像素缓冲区为纯白色
+		int bufferSize = 20;
+		for (int y = 0; y < img.rows; y++) {
+			for (int x = 0; x < img.cols; x++) {
+				if (x < bufferSize || x >= img.cols - bufferSize ||
+					y < bufferSize || y >= img.rows - bufferSize) {
+					result.at<uchar>(y, x) = 255;
+				}
+			}
+		}
+
+		return result;
 	}
 
 	/**
@@ -1083,21 +1215,62 @@ namespace ImgPraseV2 {
 						centers.push_back(helpFunction::CalRectCenter(contour));
 					}
 
-					// 计算外轮廓角点
-					vector<Point2f> points;
-					for (int k = 0; k < qrPoints.size(); k++) {
-						points.push_back(helpFunction::CalOuterCorner(qrPoints[k], centers));
+					// 根据定位点的位置确定每个定位点的角点方向
+					// 先找到四个角的大致位置（基于中心）
+					vector<Point2f> precisePoints;
+					
+					if (qrPoints.size() >= 3) {
+						// 找到各个定位点在坐标系中的位置
+						Point2f tlCenter, trCenter, blCenter, brCenter;
+						bool hasFourth = qrPoints.size() >= 4;
+						
+						// 找出x和y的极值
+						float minX = 1e10f, maxX = -1e10f;
+						float minY = 1e10f, maxY = -1e10f;
+						for (const auto& c : centers) {
+							if (c.x < minX) minX = c.x;
+							if (c.x > maxX) maxX = c.x;
+							if (c.y < minY) minY = c.y;
+							if (c.y > maxY) maxY = c.y;
+						}
+						
+						// 为每个定位点确定对应的角点方向并查找精确像素
+						for (int k = 0; k < qrPoints.size(); k++) {
+							Point2f center = centers[k];
+							int direction = -1;
+							
+							// 判断这个定位点是哪个角
+							float distToTL = (center.x - minX) + (center.y - minY);
+							float distToTR = (maxX - center.x) + (center.y - minY);
+							float distToBL = (center.x - minX) + (maxY - center.y);
+							float distToBR = (maxX - center.x) + (maxY - center.y);
+							
+							// 找到最小距离的角
+							if (distToTL <= distToTR && distToTL <= distToBL && distToTL <= distToBR) {
+								direction = 0; // 左上定位点的左上角
+							} else if (distToTR <= distToTL && distToTR <= distToBL && distToTR <= distToBR) {
+								direction = 1; // 右上定位点的右上角
+							} else if (distToBL <= distToTL && distToBL <= distToTR && distToBL <= distToBR) {
+								direction = 3; // 左下定位点的左下角
+							} else {
+								direction = 2; // 右下定位点的右下角
+							}
+							
+							// 查找精确的黑色像素角点
+							Point2f preciseCorner = helpFunction::FindPreciseCornerPixel(binaryImg, qrPoints[k], direction);
+							precisePoints.push_back(preciseCorner);
+						}
 					}
 
 					// 调整位置点顺序
-					vector<Point2f> adjusted1 = adjustPositionPoints(points, qrPoints, false);
+					vector<Point2f> adjusted1 = adjustPositionPoints(precisePoints, qrPoints, false);
 
 					// 保存调整后的点调试图像
 					if (!debugPath.empty()) {
 						Mat debugPoints2 = srcImg.clone();
-						for (int k = 0; k < points.size(); k++) {
-							circle(debugPoints2, points[k], 8, Scalar(0, 255, 0), 2);
-							putText(debugPoints2, to_string(k), points[k], FONT_HERSHEY_SIMPLEX, 0.5, Scalar(255, 255, 0), 2);
+						for (int k = 0; k < precisePoints.size(); k++) {
+							circle(debugPoints2, precisePoints[k], 8, Scalar(0, 255, 0), 2);
+							putText(debugPoints2, to_string(k), precisePoints[k], FONT_HERSHEY_SIMPLEX, 0.5, Scalar(255, 255, 0), 2);
 						}
 						for (int k = 0; k < adjusted1.size(); k++) {
 							circle(debugPoints2, adjusted1[k], 5, Scalar(0, 0, 255), -1);
@@ -1110,19 +1283,10 @@ namespace ImgPraseV2 {
 					Mat cropped1 = cropParallelRect(srcImg, adjusted1);
 
 					if (!cropped1.empty()) {
-						// 保存裁剪调试图像
+						// 保存裁剪调试图像（不画点，因为坐标已转换）
 					if (!debugPath.empty()) {
 						Mat debugCrop = cropped1.clone();
-						for (int k = 0; k < 4; k++) {
-							circle(debugCrop, adjusted1[k], 5, Scalar(0, 0, 255), -1);
-							putText(debugCrop, to_string(k), adjusted1[k], FONT_HERSHEY_SIMPLEX, 0.5, Scalar(255, 0, 0), 2);
-						}
 						imwrite(debugPath + "_2_cropped1.png", debugCrop);
-					}
-
-					// 保存最终调整大小后的图像
-					if (!debugPath.empty() && SAVE_PREPROCESS_IMAGES && !dstImg.empty()) {
-						imwrite(debugPath + "_final_1080x1080.png", dstImg);
 					}
 
 						Mat finalCrop = cropped1;
@@ -1146,11 +1310,21 @@ namespace ImgPraseV2 {
 						morphologyEx(binaryCrop, binaryCrop, MORPH_OPEN, kernel);
 
 						// 确保最终输出为1080x1080
+						Mat resizedCrop;
 						if (binaryCrop.size() != Size(1080, 1080)) {
-							resize(binaryCrop, dstImg, Size(1080, 1080), 0, 0, INTER_NEAREST);
+							resize(binaryCrop, resizedCrop, Size(1080, 1080), 0, 0, INTER_NEAREST);
 						} else {
-							dstImg = binaryCrop.clone();
+							resizedCrop = binaryCrop.clone();
 						}
+
+						// 应用10x10像素块统一优化
+						dstImg = OptimizeBy10x10Blocks(resizedCrop);
+
+						// 保存最终调整大小后的图像
+						if (!debugPath.empty() && SAVE_PREPROCESS_IMAGES && !dstImg.empty()) {
+							imwrite(debugPath + "_final_1080x1080.png", dstImg);
+						}
+
 						return true;
 					}
 				}
