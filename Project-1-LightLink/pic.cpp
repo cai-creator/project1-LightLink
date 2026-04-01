@@ -690,12 +690,12 @@ namespace ImgPraseV2 {
 		Mat result1, result2;
 		threshold(grayImg, result1, 0, 255, THRESH_BINARY | THRESH_OTSU);
 
-		// 自适应阈值
+		// 自适应阈值 - 回到原来成功的版本
 		adaptiveThreshold(grayImg, result2, 255,
 			ADAPTIVE_THRESH_GAUSSIAN_C, THRESH_BINARY,
 			15, 5);
 
-		// 形态学闭运算
+		// 形态学闭运算 - 回到原来成功的版本
 		Mat kernel = getStructuringElement(MORPH_RECT, Size(3, 3));
 		morphologyEx(result1, result1, MORPH_CLOSE, kernel);
 		morphologyEx(result2, result2, MORPH_CLOSE, kernel);
@@ -1113,32 +1113,29 @@ namespace ImgPraseV2 {
 					continue;
 				}
 
-				// 统计黑色像素数量
+				// 只统计最中心4x4区域的像素
 				int blackCount = 0;
-				int totalPixels = blockSize * blockSize;
+				int totalPixels = 0;
 
-				for (int by = 0; by < blockSize; by++) {
-					for (int bx = 0; bx < blockSize; bx++) {
+				// 只看中心4x4（像素位置 3-6）
+				for (int by = 3; by <= 6; by++) {
+					for (int bx = 3; bx <= 6; bx++) {
 						if (img.at<uchar>(y + by, x + bx) == 0) {
 							blackCount++;
 						}
+						totalPixels++;
 					}
 				}
 
 				float blackRatio = (float)blackCount / totalPixels;
 				uchar blockColor;
 
-				// 平衡的判定逻辑：既避免白色块误判，又保证黑色块正确识别
-				if (blackRatio >= 0.35f) {
-					// 黑色比例足够高，判为黑色
+				// 只使用中心4x4，简单阈值判定
+				if (blackRatio >= 0.50f) {
 					blockColor = 0;
-				} else if (blackRatio <= 0.25f) {
-					// 白色比例足够高，判为白色
+				}
+				else {
 					blockColor = 255;
-				} else {
-					// 中间区域：稍微偏向白色，但不完全判白
-					// 用30%作为中间分界点
-					blockColor = (blackRatio >= 0.3f) ? 0 : 255;
 				}
 
 				// 应用到结果图像
@@ -1313,7 +1310,7 @@ namespace ImgPraseV2 {
 							grayCrop = finalCrop.clone();
 						}
 
-						// 二值化 - 使用OTSU算法自动阈值（不做额外形态学操作，避免改变定位点）
+						// 二值化 - 只用OTSU（不做模糊，保留浅灰色白色块的原始信息）
 						Mat binaryCrop;
 						threshold(grayCrop, binaryCrop, 0, 255, THRESH_BINARY | THRESH_OTSU);
 
@@ -1325,8 +1322,90 @@ namespace ImgPraseV2 {
 							resizedCrop = binaryCrop.clone();
 						}
 
+						// 在resize后再次查找定位点验证位置，避免阴影影响
+						Mat verifiedCrop = resizedCrop;
+						vector<vector<Point>> qrPoints2;
+						if (findPositionPoints(verifiedCrop, qrPoints2)) {
+							if (qrPoints2.size() >= 3) {
+								// 找到四个角点，进行精确对齐
+								vector<Point2f> precisePoints2;
+								for (size_t k = 0; k < qrPoints2.size(); k++) {
+									Point2f center = helpFunction::CalRectCenter(qrPoints2[k]);
+									precisePoints2.push_back(center);
+								}
+
+								// 调整点顺序（找到四个角的大致位置）
+								if (precisePoints2.size() >= 3) {
+									Point2f tlCenter, trCenter, blCenter, brCenter;
+									bool hasFourth = qrPoints2.size() >= 4;
+
+									// 找出x和y的极值
+									float minX = 1e10f, maxX = -1e10f;
+									float minY = 1e10f, maxY = -1e10f;
+									for (const auto& c : precisePoints2) {
+										if (c.x < minX) minX = c.x;
+										if (c.x > maxX) maxX = c.x;
+										if (c.y < minY) minY = c.y;
+										if (c.y > maxY) maxY = c.y;
+									}
+
+									// 为每个定位点确定对应的角点方向并查找精确像素
+									vector<Point2f> preciseCorners2;
+									for (int k = 0; k < qrPoints2.size(); k++) {
+										Point2f center = precisePoints2[k];
+										int direction = -1;
+
+										// 判断这个定位点是哪个角
+										float distToTL = (center.x - minX) + (center.y - minY);
+										float distToTR = (maxX - center.x) + (center.y - minY);
+										float distToBL = (center.x - minX) + (maxY - center.y);
+										float distToBR = (maxX - center.x) + (maxY - center.y);
+
+										// 找到最小距离的角
+										if (distToTL <= distToTR && distToTL <= distToBL && distToTL <= distToBR) {
+											direction = 0; // 左上定位点的左上角
+										} else if (distToTR <= distToTL && distToTR <= distToBL && distToTR <= distToBR) {
+											direction = 1; // 右上定位点的右上角
+										} else if (distToBL <= distToTL && distToBL <= distToTR && distToBL <= distToBR) {
+											direction = 3; // 左下定位点的左下角
+										} else {
+											direction = 2; // 右下定位点的右下角
+										}
+
+										// 查找精确的黑色像素角点
+										Point2f preciseCorner = helpFunction::FindPreciseCornerPixel(verifiedCrop, qrPoints2[k], direction);
+										preciseCorners2.push_back(preciseCorner);
+									}
+
+									// 调整位置点顺序
+									vector<Point2f> adjusted2 = adjustPositionPoints(preciseCorners2, qrPoints2, false);
+
+									// 只有当我们找到4个点时才进行微调
+									if (adjusted2.size() == 4) {
+										// 再次透视变换，使用和cropParallelRect完全一样的目标坐标
+										const int targetSize = 1080;
+										const int bufferSize = 20;
+										const int qrSize = targetSize - 2 * bufferSize;
+										Size size(targetSize, targetSize);
+
+										vector<Point2f> dstPoints2 = {
+											Point2f(bufferSize, bufferSize),
+											Point2f(bufferSize + qrSize - 1, bufferSize),
+											Point2f(bufferSize + qrSize - 1, bufferSize + qrSize - 1),
+											Point2f(bufferSize, bufferSize + qrSize - 1)
+										};
+
+										Mat M2 = getPerspectiveTransform(adjusted2, dstPoints2);
+										Mat dstImg2;
+										warpPerspective(verifiedCrop, dstImg2, M2, size, INTER_NEAREST, BORDER_CONSTANT, Scalar(255));
+										verifiedCrop = dstImg2;
+									}
+								}
+							}
+						}
+
 						// 应用10x10像素块统一优化
-						dstImg = OptimizeBy10x10Blocks(resizedCrop);
+						dstImg = OptimizeBy10x10Blocks(verifiedCrop);
 
 						// 保存最终调整大小后的图像
 						if (!debugPath.empty() && SAVE_PREPROCESS_IMAGES && !dstImg.empty()) {

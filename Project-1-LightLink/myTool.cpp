@@ -9,6 +9,7 @@
 #include <map>
 #include <iomanip>
 #include <sstream>
+#include <cstdint>
 
 #define DEBUG 1
 
@@ -131,23 +132,23 @@ void decodeEXE(std::string video_path, std::string output_path) {
 					imwrite(resizedPath, resizedFrame);
 				}
 
-			// 解码单帧
+			// 解码单帧（使用二值图像专用解码函数）
 			ImageInfo info;
-			if (decodeFrame(resizedFrame, info)) {
-				decode_success_count++;
-				frameMap[info.FrameBase] = info;
-
+			if (decodeFrameBinary(resizedFrame, info)) {
 				std::cout << "Frame " << i << ": No." << info.FrameBase
 					<< " Start=" << info.IsStart << " End=" << info.IsEnd
 					<< " CheckCode=" << info.CheckCode;
 
-				// 校验（暂时禁用）
-				// if (verifyCheckCode(info)) {
-				std::cout << " [OK]" << std::endl;
-				// }
-				// else {
-				// 	std::cout << " [CHECK FAILED]" << std::endl;
-				// }
+				// CRC校验
+				if (verifyCheckCode(info)) {
+					std::cout << " [CRC OK]" << std::endl;
+					decode_success_count++;
+					frameMap[info.FrameBase] = info;
+				} else {
+					std::cout << " [CRC FAILED - ABANDONED]" << std::endl;
+					decode_fail_count++;
+					// CRC校验失败，这帧弃权，不添加到frameMap
+				}
 			} else {
 				// 处理后的帧解码失败，直接标记为失败
 				decode_fail_count++;
@@ -168,10 +169,54 @@ void decodeEXE(std::string video_path, std::string output_path) {
 
 	std::vector<unsigned char> outputData;
 
-	// 按帧编号顺序合并数据
+	// 找到最大的帧编号
+	uint16_t maxFrameNum = 0;
 	for (auto& pair : frameMap) {
-		ImageInfo& info = pair.second;
-		outputData.insert(outputData.end(), info.Info.begin(), info.Info.end());
+		if (pair.first > maxFrameNum) {
+			maxFrameNum = pair.first;
+		}
+	}
+
+	// 计算每帧的数据大小（取第一帧的大小，如果没有第一帧则使用一个合理的默认值）
+	int frameDataSize = 0;
+	if (!frameMap.empty()) {
+		frameDataSize = (int)frameMap.begin()->second.Info.size();
+	} else {
+		// 默认大小：10个信息区的总容量
+		frameDataSize = 68 + 70 + 234 + 234 + 234 + 234 + 72 + 72 + 16 + 8;
+	}
+
+	// 如果没有解码到任何帧，直接返回
+	if (frameMap.empty()) {
+		std::cout << "No frames decoded!" << std::endl;
+	} else {
+		// 只遍历解码到的帧，中间有间隙才补零
+		uint16_t prevFrameNum = 0;
+		bool firstFrame = true;
+
+		for (auto& pair : frameMap) {
+			uint16_t frameNum = pair.first;
+			ImageInfo& info = pair.second;
+
+			if (firstFrame) {
+				// 第一帧，直接添加
+				firstFrame = false;
+				outputData.insert(outputData.end(), info.Info.begin(), info.Info.end());
+				prevFrameNum = frameNum;
+			} else {
+				// 检查和前一帧之间是否有间隙
+				if (frameNum > prevFrameNum + 1) {
+					// 有间隙，补零
+					for (uint16_t missingNum = prevFrameNum + 1; missingNum < frameNum; missingNum++) {
+						std::cout << "Frame " << missingNum << ": Missing, filling with zeros" << std::endl;
+						outputData.resize(outputData.size() + frameDataSize, 0);
+					}
+				}
+				// 添加当前帧
+				outputData.insert(outputData.end(), info.Info.begin(), info.Info.end());
+				prevFrameNum = frameNum;
+			}
+		}
 	}
 
 	// 调试：显示前16字节

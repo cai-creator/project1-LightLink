@@ -628,4 +628,182 @@ namespace decode {
         // 失败时使用默认方式返回结果
         return decodeFrameWithThreshold(frame, info, avg_gray);
     }
+
+    // ==================== 二值图像专用解码函数 ====================
+
+    // 直接读取10x10块的颜色（0=黑，255=白）
+    inline bool readBinaryBlock(const cv::Mat& binaryFrame, int start_row, int start_col, int block_size = 10) {
+        int black_count = 0;
+        int total = 0;
+        for (int r = 0; r < block_size; r++) {
+            for (int c = 0; c < block_size; c++) {
+                int row = start_row + r;
+                int col = start_col + c;
+                if (row < binaryFrame.rows && col < binaryFrame.cols) {
+                    uchar pixel = binaryFrame.at<uchar>(row, col);
+                    if (pixel < 128) black_count++;
+                    total++;
+                }
+            }
+        }
+        // 投票：超过一半是黑就判黑
+        return black_count > total / 2;
+    }
+
+    // 读取帧标志位（二值图像版）
+    bool readFrameFlagBinary(const cv::Mat& binaryFrame, bool& isStart, bool& isEnd) {
+        const int fixed_col = 870;
+        const int block_size = 10;
+        bool flag[4];
+
+        for (int i = 0; i < 4; i++) {
+            int start_row = i * block_size + 20;
+            flag[i] = readBinaryBlock(binaryFrame, start_row, fixed_col, block_size);
+        }
+
+        bool b0 = flag[0];
+        bool b1 = flag[1];
+        bool b2 = flag[2];
+        bool b3 = flag[3];
+
+        DECODE_DBG("[BINARY] Frame flag bits: " << b0 << " " << b1 << " " << b2 << " " << b3);
+
+        // 黑白白黑: 起始帧
+        if (b0 && !b1 && !b2 && b3) {
+            isStart = true;
+            isEnd = false;
+            DECODE_DBG("[BINARY] Frame flag: Start frame");
+            return true;
+        }
+        // 黑白黑白: 中间帧
+        else if (b0 && !b1 && b2 && !b3) {
+            isStart = false;
+            isEnd = false;
+            DECODE_DBG("[BINARY] Frame flag: Middle frame");
+            return true;
+        }
+        // 白黑黑白: 终止帧
+        else if (!b0 && b1 && b2 && !b3) {
+            isStart = false;
+            isEnd = true;
+            DECODE_DBG("[BINARY] Frame flag: End frame");
+            return true;
+        }
+        // 白黑白黑: 单帧
+        else if (!b0 && b1 && !b2 && b3) {
+            isStart = true;
+            isEnd = true;
+            DECODE_DBG("[BINARY] Frame flag: Single frame");
+            return true;
+        }
+
+        DECODE_DBG("[BINARY] Frame flag: Invalid pattern");
+        return false;
+    }
+
+    // 读取帧编号（二值图像版）
+    uint16_t readFrameNumberBinary(const cv::Mat& binaryFrame) {
+        const int fixed_col = 880;
+        const int block_size = 10;
+        uint16_t number = 0;
+
+        for (int i = 0; i < 16; i++) {
+            int start_row = i * block_size + 20;
+            bool bit = readBinaryBlock(binaryFrame, start_row, fixed_col, block_size);
+            number |= (bit ? 1 : 0) << i;
+        }
+        return number;
+    }
+
+    // 读取校验码（二值图像版）
+    uint16_t readCheckCodeBinary(const cv::Mat& binaryFrame) {
+        const int fixed_col = 890;
+        const int block_size = 10;
+        uint16_t code = 0;
+
+        for (int i = 0; i < 16; i++) {
+            int start_row = i * block_size + 20;
+            bool bit = readBinaryBlock(binaryFrame, start_row, fixed_col, block_size);
+            code |= (bit ? 1 : 0) << i;
+        }
+        return code;
+    }
+
+    // 读取数据长度（二值图像版）
+    int readDataLengthBinary(const cv::Mat& binaryFrame) {
+        const int fixed_col = 870;
+        const int block_size = 10;
+        int length = 0;
+
+        for (int i = 0; i < 12; i++) {
+            int start_row = i * block_size + 60;
+            bool bit = readBinaryBlock(binaryFrame, start_row, fixed_col, block_size);
+            length |= (bit ? 1 : 0) << i;
+        }
+        return length;
+    }
+
+    // 读取信息区数据（二值图像版）
+    bool readInfoDataBinary(const cv::Mat& binaryFrame, int areaId, int len, unsigned char* output) {
+        if (areaId < 0 || areaId >= 10 || len <= 0) return false;
+
+        int start_x = INFO_AREA_SIZE[areaId][0];
+        int start_y = INFO_AREA_SIZE[areaId][1];
+        int rows = INFO_AREA_SIZE[areaId][2];
+        int cols = INFO_AREA_SIZE[areaId][3];
+        const int block_size = 10;
+
+        int total_bits = len * 8;
+        int bit_index = 0;
+
+        for (int row = 0; row < rows; row += block_size) {
+            for (int col = 0; col < cols; col += block_size) {
+                if (bit_index >= total_bits) break;
+
+                bool bit = readBinaryBlock(binaryFrame, start_x + row, start_y + col, block_size);
+                int original_bit = randomizeBit(bit, areaId, row / block_size, col / block_size);
+
+                int byte_index = bit_index / 8;
+                int bit_offset = 7 - (bit_index % 8);
+                if (bit_offset == 7) output[byte_index] = 0;
+                output[byte_index] |= (original_bit << bit_offset);
+                bit_index++;
+            }
+        }
+        return true;
+    }
+
+    // 二值图像解码主函数
+    bool decodeFrameBinary(const cv::Mat& binaryFrame, ImageInfo& info) {
+        if (binaryFrame.cols != FrameSize || binaryFrame.rows != FrameSize) {
+            std::cerr << "Error: Invalid binary frame size" << std::endl;
+            return false;
+        }
+
+        if (!readFrameFlagBinary(binaryFrame, info.IsStart, info.IsEnd)) return false;
+
+        info.FrameBase = readFrameNumberBinary(binaryFrame);
+        info.CheckCode = readCheckCodeBinary(binaryFrame);
+        int dataLength = readDataLengthBinary(binaryFrame);
+        info.dataLength = dataLength;
+
+        info.Info.resize(dataLength, 0);
+        int offset = 0;
+        int remainingLength = dataLength;
+
+        for (int i = 0; i < 10; i++) {
+            int len = std::min(LEN_MIN[i], remainingLength);
+            if (len <= 0) break;
+            readInfoDataBinary(binaryFrame, i, len, info.Info.data() + offset);
+            remainingLength -= len;
+            offset += len;
+        }
+
+        if (verifyCheckCode(info)) {
+            DECODE_DBG("[BINARY] Decoded successfully with CRC OK");
+            return true;
+        }
+        DECODE_DBG("[BINARY] CRC verification failed, returning anyway");
+        return true; // 即使CRC失败也返回，至少有数据
+    }
 }

@@ -56,4 +56,7 @@ namespace decode {
     // info: 输出解码后的帧信息
     // 返回是否解码成功
     bool decodeFrame(const cv::Mat& frame, ImageInfo& info);
+
+    // 专门针对预处理后的二值图像解码（直接使用0/255判断）
+    bool decodeFrameBinary(const cv::Mat& binaryFrame, ImageInfo& info);
 }
